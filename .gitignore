@@ -42,3 +42,9 @@ tensorboard/
 # 临时文件
 *.log
 *.tmp
+
+# ai tool config
+.opencode
+.superset
+.claude
+opencode.jsonc
