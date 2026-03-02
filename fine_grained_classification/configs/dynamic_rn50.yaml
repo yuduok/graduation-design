@@ -1,0 +1,65 @@
+# 动态提示词训练配置文件
+# 基于CoOp默认配置
+
+DATALOADER:
+  TRAIN_X:
+    BATCH_SIZE: 32
+  TEST:
+    BATCH_SIZE: 64
+  NUM_WORKERS: 4
+
+INPUT:
+  SIZE: (224, 224)
+  INTERPOLATION: "bicubic"
+  PIXEL_MEAN: [0.48145466, 0.4578275, 0.40821073]
+  PIXEL_STD: [0.26862954, 0.26130258, 0.27577711]
+  TRANSFORMS: ["random_resized_crop", "random_flip", "normalize"]
+
+OPTIM:
+  NAME: "sgd"
+  LR: 0.002
+  MAX_EPOCH: 50
+  LR_SCHEDULER: "cosine"
+  WARMUP_EPOCH: 1
+  WARMUP_TYPE: "constant"
+  WARMUP_CONS_LR: 1e-5
+
+TRAIN:
+  PRINT_FREQ: 5
+
+MODEL:
+  BACKBONE:
+    NAME: "RN50"
+  INIT_WEIGHTS: ""
+
+DATASET:
+  NAME: "oxford_pets"
+  NUM_SHOTS: 1
+  SPLIT: "0"
+  PROMPT:
+    TOKENIZER_NAME: "ViT-B/32"
+    MAX_TOKEN_LEN: 77
+
+TRAINER:
+  NAME: "DynamicPromptTrainer"
+  PREC: "fp32"
+
+  DYNAMIC:
+    CTX_INIT: "a photo of a"
+    N_CTX: 16
+    PREC: "fp32"
+    MODEL_TYPE: "dynamic"
+    USE_DYNAMIC: true
+    USE_ADAPTIVE: true
+    USE_DIFFICULTY_WEIGHT: true
+    ALPHA: 0.1
+    BETA: 0.01
+    ADAPTIVE_HIDDEN_DIM: 64
+    USE_SEMANTIC_ENHANCEMENT: false
+    USE_ATTRIBUTE_DATABASE: true
+    MONITOR_INTERVAL: 60
+
+OUTPUT_DIR: "output_fgd/oxford_pets"
+SEED: 1
+EVAL_ONLY: false
+MODEL_DIR: ""
