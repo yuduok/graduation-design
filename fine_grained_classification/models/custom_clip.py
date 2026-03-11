@@ -7,14 +7,13 @@ import torch.nn as nn
 from torch.nn import functional as F
 import importlib
 
+# 使用CoOp的clip模块
+from clip import clip
+from clip.simple_tokenizer import SimpleTokenizer as _Tokenizer
+
 
 def load_clip_to_cpu(cfg):
     """加载CLIP模型到CPU"""
-    try:
-        import clip
-    except ImportError:
-        raise ImportError("Please install CLIP: pip install git+https://github.com/openai/CLIP.git")
-    
     backbone_name = cfg.MODEL.BACKBONE.NAME
     url = clip._MODELS[backbone_name]
     model_path = clip._download(url)
@@ -115,20 +114,28 @@ class CustomCLIPDynamic(nn.Module):
         # 3. 编码文本
         # prompts shape: [batch_size, n_cls, n_tkn, ctx_dim]
         batch_size, n_cls, n_tkn, _ = prompts.shape
-        logits = []
         
-        for i in range(batch_size):
-            # 对每张图像，获取其对应的n_cls个提示词
-            batch_prompts = prompts[i]  # [n_cls, n_tkn, ctx_dim]
-            text_features = self.text_encoder(batch_prompts, self.tokenized_prompts)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-            
-            # 计算logits
-            logit_scale = self.logit_scale.exp()
-            logit = logit_scale * image_features[i] @ text_features.T
-            logits.append(logit)
+        # 重塑为批量编码 [batch_size * n_cls, n_tkn, ctx_dim]
+        prompts_flat = prompts.view(-1, n_tkn, prompts.size(-1))  # [batch_size * n_cls, n_tkn, ctx_dim]
         
-        logits = torch.stack(logits)  # [batch_size, n_cls]
+        # 为批量编码创建对应的 tokenized prompts (扩展到 batch_size * n_cls)
+        # self.tokenized_prompts: [n_cls, seq_len] -> [batch_size, n_cls, seq_len] -> [batch_size * n_cls, seq_len]
+        tokenized_prompts_batch = self.tokenized_prompts.unsqueeze(0).expand(batch_size, -1, -1).reshape(batch_size * n_cls, -1)
+        
+        # 批量编码所有提示词
+        text_features = self.text_encoder(prompts_flat, tokenized_prompts_batch)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        
+        # 重塑回 [batch_size, n_cls, ctx_dim]
+        text_features = text_features.view(batch_size, n_cls, -1)
+        
+        # 计算logits: [batch_size, n_cls]
+        # image_features: [batch_size, ctx_dim]
+        # text_features: [batch_size, n_cls, ctx_dim]
+        # 需要: [batch_size, 1, ctx_dim] @ [batch_size, n_cls, ctx_dim].transpose(1,2) -> [batch_size, 1, n_cls]
+        logit_scale = self.logit_scale.exp()
+        image_features_3d = image_features.unsqueeze(1)  # [batch_size, 1, ctx_dim]
+        logits = logit_scale * (image_features_3d @ text_features.transpose(1, 2)).squeeze(1)
         
         # 4. 语义增强（如果启用）
         if self.semantic_enhancer is not None:

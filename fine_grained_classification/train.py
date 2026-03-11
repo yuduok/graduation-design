@@ -6,10 +6,39 @@ import argparse
 import os
 import sys
 
-# 添加CoOp路径到sys.path
-coop_path = os.path.join(os.path.dirname(__file__), "CoOp")
-if coop_path not in sys.path:
-    sys.path.insert(0, coop_path)
+# CoOp目录（与项目目录平行）
+COOP_PATH = "/Users/yudu/Documents/毕业设计/CoOp"
+if COOP_PATH not in sys.path:
+    sys.path.insert(0, COOP_PATH)
+
+# CoOp数据目录
+DATA_PATH = "/Users/yudu/Documents/毕业设计/data"
+
+# 项目根目录
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# 导入CoOp数据集模块（注册数据集）
+import datasets.oxford_pets
+import datasets.oxford_flowers
+import datasets.fgvc_aircraft
+import datasets.dtd
+import datasets.eurosat
+import datasets.stanford_cars
+import datasets.food101
+import datasets.sun397
+import datasets.caltech101
+import datasets.ucf101
+import datasets.imagenet
+
+# 导入CoOp trainer 模块
+import trainers.coop
+import trainers.cocoop
+import trainers.zsclip
+
+# 导入自定义模块
+import models.trainer  # 注册 DynamicPromptTrainer
 
 from dassl.utils import setup_logger, set_random_seed, collect_env_info
 from dassl.config import get_cfg_default
@@ -25,7 +54,7 @@ def parse_args():
     parser.add_argument("-s", "--save-dir", type=str, default="output_fgd/oxford_pets",
                        help="directory to save training outputs")
     parser.add_argument("-d", "--dataset", type=str, default="oxford_pets",
-                       choices=["oxford_pets", "caltech101", "food101"],
+                       choices=["oxford_pets", "oxford_flowers", "stanford_cars", "food101", "caltech101", "sun397", "ucf101", "fgvc_aircraft", "dtd", "eurosat", "imagenet"],
                        help="dataset name")
     parser.add_argument("-t", "--trainer", type=str, default="DynamicPromptTrainer",
                        choices=["CoOp", "CoCoOp", "DynamicPromptTrainer"],
@@ -49,16 +78,63 @@ def parse_args():
     parser.add_argument("--split", type=str, default="1",
                        choices=["0", "1", "2", "3"],
                        help="dataset split for few-shot")
-    parser.add_argument("--device", type=str, default="cuda",
+    parser.add_argument("--device", type=str, default="cpu",
                        choices=["cuda", "cpu", "mps"],
                        help="device to use")
     
     return parser.parse_args()
 
 
+def extend_cfg(cfg):
+    """扩展默认配置，添加自定义变量"""
+    from yacs.config import CfgNode as CN
+    
+    # CoOp trainer 配置
+    cfg.TRAINER.COOP = CN()
+    cfg.TRAINER.COOP.N_CTX = 16
+    cfg.TRAINER.COOP.CSC = False
+    cfg.TRAINER.COOP.CTX_INIT = ""
+    cfg.TRAINER.COOP.PREC = "fp16"
+    cfg.TRAINER.COOP.CLASS_TOKEN_POSITION = "end"
+    
+    # CoCoOp trainer 配置
+    cfg.TRAINER.COCOOP = CN()
+    cfg.TRAINER.COCOOP.N_CTX = 16
+    cfg.TRAINER.COCOOP.CTX_INIT = ""
+    cfg.TRAINER.COCOOP.PREC = "fp16"
+    
+    # 数据集配置
+    cfg.DATASET.SUBSAMPLE_CLASSES = "all"
+    cfg.DATASET.SPLIT = 0
+    cfg.DATASET.NUM_SHOTS = 0
+    
+    # 评估配置
+    cfg.EVAL_ONLY = False
+    cfg.MODEL_DIR = ""
+    
+    # 动态提示词配置
+    cfg.TRAINER.DYNAMIC = CN()
+    cfg.TRAINER.DYNAMIC.CTX_INIT = "a photo of a"
+    cfg.TRAINER.DYNAMIC.N_CTX = 16
+    cfg.TRAINER.DYNAMIC.PREC = "fp32"
+    cfg.TRAINER.DYNAMIC.MODEL_TYPE = "dynamic"
+    cfg.TRAINER.DYNAMIC.USE_DYNAMIC = True
+    cfg.TRAINER.DYNAMIC.USE_ADAPTIVE = True
+    cfg.TRAINER.DYNAMIC.USE_DIFFICULTY_WEIGHT = True
+    cfg.TRAINER.DYNAMIC.ALPHA = 0.1
+    cfg.TRAINER.DYNAMIC.BETA = 0.01
+    cfg.TRAINER.DYNAMIC.ADAPTIVE_HIDDEN_DIM = 64
+    cfg.TRAINER.DYNAMIC.USE_SEMANTIC_ENHANCEMENT = False
+    cfg.TRAINER.DYNAMIC.USE_ATTRIBUTE_DATABASE = True
+    cfg.TRAINER.DYNAMIC.MONITOR_INTERVAL = 60
+
+
 def setup_cfg(args):
     """设置配置"""
     cfg = get_cfg_default()
+    
+    # 先扩展配置，添加自定义变量
+    extend_cfg(cfg)
     
     # 使用绝对路径
     config_path = os.path.join(args.root, args.config)
@@ -67,8 +143,26 @@ def setup_cfg(args):
     # 合并命令行参数
     if args.root:
         cfg.ROOT = args.root
+    
+    # 设置数据集根目录（使用CoOp的data目录）
+    cfg.DATASET.ROOT = DATA_PATH
+    
     if args.dataset:
-        cfg.DATASET.NAME = args.dataset
+        # 数据集名称映射（用户友好名称 -> CoOp内部名称）
+        dataset_name_map = {
+            "oxford_pets": "OxfordPets",
+            "oxford_flowers": "OxfordFlowers",
+            "stanford_cars": "StanfordCars",
+            "food101": "Food101",
+            "caltech101": "Caltech101",
+            "sun397": "SUN397",
+            "ucf101": "UCF101",
+            "fgvc_aircraft": "FGVCAircraft",
+            "dtd": "DescribableTextures",
+            "eurosat": "EuroSAT",
+            "imagenet": "ImageNet"
+        }
+        cfg.DATASET.NAME = dataset_name_map.get(args.dataset, args.dataset)
     if args.trainer:
         cfg.TRAINER.NAME = args.trainer
     if args.batch_size:

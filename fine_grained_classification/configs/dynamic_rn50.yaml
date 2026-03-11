@@ -32,34 +32,5 @@ MODEL:
     NAME: "RN50"
   INIT_WEIGHTS: ""
 
-DATASET:
-  NAME: "oxford_pets"
-  NUM_SHOTS: 1
-  SPLIT: "0"
-  PROMPT:
-    TOKENIZER_NAME: "ViT-B/32"
-    MAX_TOKEN_LEN: 77
-
-TRAINER:
-  NAME: "DynamicPromptTrainer"
-  PREC: "fp32"
-
-  DYNAMIC:
-    CTX_INIT: "a photo of a"
-    N_CTX: 16
-    PREC: "fp32"
-    MODEL_TYPE: "dynamic"
-    USE_DYNAMIC: true
-    USE_ADAPTIVE: true
-    USE_DIFFICULTY_WEIGHT: true
-    ALPHA: 0.1
-    BETA: 0.01
-    ADAPTIVE_HIDDEN_DIM: 64
-    USE_SEMANTIC_ENHANCEMENT: false
-    USE_ATTRIBUTE_DATABASE: true
-    MONITOR_INTERVAL: 60
-
 OUTPUT_DIR: "output_fgd/oxford_pets"
 SEED: 1
-EVAL_ONLY: false
-MODEL_DIR: ""

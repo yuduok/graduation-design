@@ -15,6 +15,12 @@ from flask_cors import CORS
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
+# 添加CoOp路径（必须！）
+COOP_PATH = "/Users/yudu/Documents/毕业设计/CoOp"
+sys.path.insert(0, COOP_PATH)
+
+import clip
+
 app = Flask(__name__)
 CORS(app)
 
@@ -138,5 +144,5 @@ def get_classes():
 
 
 if __name__ == '__main__':
-    print("Starting API server on http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    print("Starting API server on http://localhost:5001")
+    app.run(host='0.0.0.0', port=5001, debug=False)

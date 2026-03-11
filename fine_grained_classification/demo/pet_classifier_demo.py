@@ -13,13 +13,12 @@ import numpy as np
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
-# 添加CoOp的clip路径（避免冲突）
-COOP_PATH = "/Users/yudu/Documents/毕业设计/CoOp"
-sys.path.insert(0, os.path.join(COOP_PATH, "clip"))
+# 添加CoOp的clip模块路径
+import sys
+sys.path.insert(0, "/Users/yudu/Documents/毕业设计/CoOp")
+# 直接导入clip模块，避免相对导入问题
+import clip.clip as clip_module
 import clip
-
-# 添加dassl路径
-sys.path.insert(0, os.path.join(COOP_PATH, "dassl"))
 
 
 class PetClassifierDemo:
@@ -169,7 +168,7 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.image(image, caption="上传图片", use_column_width=True)
+            st.image(image, caption="上传图片", use_container_width=True)
         
         if st.button("开始识别", type="primary"):
             with st.spinner("正在识别..."):

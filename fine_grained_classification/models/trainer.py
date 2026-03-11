@@ -184,7 +184,7 @@ class DynamicPromptTrainer(TrainerX):
         
         if elapsed >= self.monitor_interval:
             # 打印训练信息
-            epoch_info = f"Epoch {self.current_epoch}"
+            epoch_info = f"Epoch {self.epoch}"
             batch_info = f"Batch {self.batch_idx + 1}/{self.num_batches}"
             loss_info = f"Loss: {loss_summary['loss']:.4f}"
             acc_info = f"Acc: {loss_summary['acc']:.2%}"

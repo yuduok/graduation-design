@@ -188,8 +188,7 @@ class SoftPromptAdapter(nn.Module):
         bias = bias.unsqueeze(1)  # [batch_size, 1, ctx_dim]
         
         # 基础上下文扩展
-        ctx = base_ctx.unsqueeze(0)  # [1, n_ctx, ctx_dim]
-        ctx = ctx.unsqueeze(0).expand(batch_size, -1, -1)  # [batch_size, n_ctx, ctx_dim]
+        ctx = base_ctx.unsqueeze(0).expand(batch_size, -1, -1)  # [batch_size, n_ctx, ctx_dim]
         
         # 添加偏移
         ctx_shifted = ctx + bias  # [batch_size, n_ctx, ctx_dim]
@@ -240,6 +239,9 @@ class AdaptivePromptLearner(nn.Module):
         
         self.ctx = nn.Parameter(ctx_vectors)
         self.n_ctx = n_ctx
+        
+        # 当前难度权重（用于损失计算）
+        self.current_weights = None
         
         # 动态优化器
         use_dynamic = getattr(cfg.TRAINER.DYNAMIC, 'USE_DYNAMIC', True)
