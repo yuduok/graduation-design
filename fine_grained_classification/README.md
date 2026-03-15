@@ -1,160 +1,158 @@
-# 细粒度猫狗分类系统
+# 基于动态提示词优化的细粒度猫狗分类系统
 
-基于 CLIP + 动态提示词优化的细粒度猫狗品种分类
+基于 CLIP + 动态提示词优化的细粒度猫狗品种分类框架，结合多模态信息（图像特征与文本语义），提升模型对相似品种的区分能力。
+
+## 环境安装
+
+**Python 版本**: 3.8
+
+```bash
+# 1. 创建虚拟环境
+python3.8 -m venv venv
+source venv/bin/activate
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 安装 CLIP（从 CoOp 目录中引用，无需额外安装）
+#    CLIP 和 Dassl 已作为源码包含在 ../CoOp/ 目录中
+#    如果独立使用，需手动安装：
+#    pip install git+https://github.com/openai/CLIP.git
+#    cd ../CoOp/dassl && pip install -e .
+```
+
+## 数据准备
+
+下载 Oxford-IIIT Pets 数据集，放置到与本项目平级的 `data/` 目录：
+
+```bash
+mkdir -p ../data/oxford_pets && cd ../data/oxford_pets
+
+# 下载并解压
+wget https://www.robots.ox.ac.uk/~vgg/data/pets/data/images.tar.gz
+wget https://www.robots.ox.ac.uk/~vgg/data/pets/data/annotations.tar.gz
+tar -xzf images.tar.gz
+tar -xzf annotations.tar.gz
+```
+
+目录结构：
+```
+毕业设计/
+├── CoOp/                        # CoOp 框架（含 CLIP + Dassl）
+├── data/
+│   └── oxford_pets/
+│       ├── images/              # 7,390 张图片
+│       ├── annotations/
+│       └── split_zhou_OxfordPets.json
+└── fine_grained_classification/ # 本项目
+```
 
 ## 项目结构
 
 ```
 fine_grained_classification/
-├── train.py              # 训练脚本
-├── evaluate.py           # 评估脚本
+├── train.py                     # 训练入口（支持 CoOp/CoCoOp/DynamicPromptTrainer）
+├── evaluate.py                  # 评估脚本
+├── collect_results.py           # 实验结果汇总与图表生成
+├── run_experiments.sh           # 自动化批量实验脚本
+├── requirements.txt             # Python 依赖
 ├── configs/
-│   └── dynamic_rn50.yaml  # 训练配置
+│   └── dynamic_rn50.yaml        # 训练超参配置
 ├── models/
-│   ├── custom_clip.py     # 自定义CLIP模型
-│   ├── dynamic_prompt.py  # 动态提示词模块
-│   ├── trainer.py         # 训练器
-│   └── breed_semantic.py  # 品种语义增强
-├── utils/
-│   └── helpers.py         # 工具函数
+│   ├── custom_clip.py           # 自定义 CLIP（整合动态提示 + 语义增强）
+│   ├── dynamic_prompt.py        # AdaptivePromptLearner + SoftPromptAdapter
+│   ├── trainer.py               # DynamicPromptTrainer（注册到 Dassl）
+│   └── breed_semantic.py        # 品种属性库（37 品种特征描述）
 ├── demo/
-│   └── pet_classifier_demo.py  # Streamlit演示
-└── web/
-    └── app.py             # Flask API服务
+│   └── pet_classifier_demo.py   # Streamlit 交互演示
+├── web/
+│   └── app.py                   # Flask REST API 服务
+└── utils/
+    └── helpers.py               # 可视化与度量工具
 ```
 
 ## 快速开始
 
-### 1. 环境安装
+### 训练模型
 
 ```bash
-pip install torch torchvision
-pip install clip
-pip install streamlit
-pip install flask flask-cors
-pip install open-clip-torch  # 或使用原版CLIP
+# 单组实验（输出自动保存到 output_fgd/oxford_pets/{trainer}/shots_{n}/seed_{s}/）
+python train.py -d oxford_pets -e 50 -b 32 --shots 1 --trainer DynamicPromptTrainer --device cuda
+
+# 批量运行全部 9 组对比实验（3 方法 × 3 shot）
+bash run_experiments.sh cuda
+
+# 汇总结果并生成图表
+python collect_results.py --latex --plot
 ```
 
-### 2. 数据准备
-
-下载 Oxford-IIIT Pets 数据集：
+### 启动演示
 
 ```bash
-# 下载数据集
-wget https://www.robots.ox.ac.uk/~vgg/data/pets/data/images.tar.gz
-wget https://www.robots.ox.ac.uk/~vgg/data/pets/data/annotations.tar.gz
+# Streamlit 界面 → http://localhost:8501
+streamlit run demo/pet_classifier_demo.py
 
-# 解压
-tar -xzf images.tar.gz
-tar -xzf annotations.tar.gz
+# Flask API → http://localhost:5001
+cd web && python app.py
+
+# 使用训练好的模型启动 API
+python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/seed_1/prompt_learner/model-best.pth.tar
 ```
 
-放置结构：
+## 核心方法
+
+### 动态提示词 vs CoOp
+
+| 特性 | CoOp（基线） | 本系统（DynamicPromptTrainer） |
+|------|-------------|-------------------------------|
+| 提示词生成 | 所有图片共享同一组可学习 ctx 向量 | 每张图片经 SoftPromptAdapter 生成独特偏移 |
+| 训练信号 | 均匀 Cross-Entropy loss | 难度加权 loss：难样本梯度放大 2-4x |
+| 适应机制 | 无 | SoftPromptAdapter (512→64→512 双层 MLP) |
+
+### 工作流程
+
 ```
-data/
-├── images/
-│   ├── Abyssinian_1.jpg
-│   ├── ...
-└── annotations/
-    ├── annotations.txt
-    └── ...
-```
-
-### 3. 训练模型
-
-```bash
-cd /Users/yudu/Documents/毕业设计/fine_grained_classification
-
-# 基本训练
-python train.py -c configs/dynamic_rn50.yaml
-
-# 指定few-shot数量
-python train.py -c configs/dynamic_rn50.yaml --shots 1
-python train.py -c configs/dynamic_rn50.yaml --shots 4
-python train.py -c configs/dynamic_rn50.yaml --shots 16
-
-# 训练CoOp模型
-python train.py -c configs/dynamic_rn50.yaml -t CoOp
-
-# 使用不同的backbone
-python train.py -c configs/dynamic_rn50.yaml --backbone ViT-B/32
+输入图片 → [冻结] CLIP 视觉编码器 → image_features
+         → [可训练] SoftPromptAdapter MLP → ctx 偏移
+         → 基础 ctx + 偏移 → 图片条件提示词
+         → [冻结] CLIP 文本编码器 → 相似度计算
+         → DifficultyWeightCalculator → 加权 CE loss
+         → 反向传播（仅更新 ctx + MLP 参数）
 ```
 
-### 4. 评估模型
+### 核心模块
 
-```bash
-python evaluate.py --model-dir output_fgd/oxford_pets/DynamicPromptTrainer/rn50
-```
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| AdaptivePromptLearner | `models/dynamic_prompt.py` | 图像条件提示词生成 |
+| SoftPromptAdapter | `models/dynamic_prompt.py` | 双层 MLP 生成 ctx 偏移 |
+| DifficultyWeightCalculator | `models/dynamic_prompt.py` | 基于原型距离的难度加权 |
+| BreedAttributeDatabase | `models/breed_semantic.py` | 37 品种属性库（毛发/面部/体型） |
+| SemanticEnhancer | `models/breed_semantic.py` | 多模板语义增强 |
 
-### 5. 启动演示
+## 训练配置
 
-```bash
-cd demo
-streamlit run pet_classifier_demo.py
-```
+主要超参数（`configs/dynamic_rn50.yaml`）：
 
-访问 `http://localhost:8501` 查看演示界面。
-
-### 6. 启动API服务
-
-```bash
-cd web
-python app.py
-```
-
-访问 `http://localhost:5000/api/health` 测试API。
-
-## 配置说明
-
-主要配置项（`configs/dynamic_rn50.yaml`）：
-
-```yaml
-TRAINER:
-  DYNAMIC:
-    CTX_INIT: "a photo of a"  # 初始提示词
-    N_CTX: 16                  # 可学习token数量
-    USE_DYNAMIC: true          # 使用动态优化
-    USE_ADAPTIVE: true         # 使用自适应调整
-    USE_DIFFICULTY_WEIGHT: true # 使用难度权重
-    ALPHA: 0.1                 # 学习率
-    BETA: 0.01                 # 正则化系数
-    USE_SEMANTIC_ENHANCEMENT: false  # 语义增强（可选）
-```
-
-## 核心模块
-
-### 1. 动态提示词优化 (`models/dynamic_prompt.py`)
-
-- `DynamicPromptOptimizer`: 根据困难样本自适应调整提示词
-- `DifficultyWeightCalculator`: 计算样本难度权重
-- `SoftPromptAdapter`: 使用MLP动态生成提示词偏移
-- `AdaptivePromptLearner`: 自适应提示词学习器
-
-### 2. 品种语义增强 (`models/breed_semantic.py`)
-
-- `BreedAttributeDatabase`: 品种属性数据库（37种猫狗品种）
-- `SemanticEnhancer`: 语义增强模块
-
-### 3. 自定义CLIP (`models/custom_clip.py`)
-
-- `CustomCLIPDynamic`: 动态提示版本
-- `CustomCLIPCoCoOp`: CoCoOp风格版本
-
-## 创新点
-
-1. **动态提示词调整机制**: 根据困难样本自适应修改提示词
-2. **难度加权损失**: 对难分类样本给予更高权重
-3. **品种语义增强**: 利用品种属性描述增强文本嵌入
-4. **可视化决策解释**: 展示预测结果和置信度
+| 参数 | 值 |
+|------|-----|
+| Backbone | CLIP RN50 |
+| 优化器 | SGD (lr=0.002) |
+| 学习率调度 | Cosine Annealing + warmup 1 epoch |
+| 训练轮次 | 50 |
+| 可学习 ctx | 4 tokens，初始化为 "a photo of a" |
+| SoftPromptAdapter | 512→64→512 MLP |
 
 ## 实验结果
 
 | 方法 | 1-shot | 4-shot | 16-shot |
 |------|--------|--------|---------|
-| Zero-shot CLIP | xx% | xx% | xx% |
-| CoOp | xx% | xx% | xx% |
-| CoCoOp | xx% | xx% | xx% |
-| **Ours (Dynamic)** | xx% | xx% | xx% |
+| Zero-shot CLIP | ~81% | ~81% | ~81% |
+| CoOp | - | - | - |
+| CoCoOp | - | - | - |
+| **Ours (Dynamic)** | - | - | - |
+
+> 待训练完成后由 `python collect_results.py` 自动填充。
 
 ## 参考资料
 
