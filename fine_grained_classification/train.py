@@ -51,8 +51,8 @@ def parse_args():
                        help="path to project root")
     parser.add_argument("-c", "--config", type=str, default="configs/dynamic_rn50.yaml",
                        help="path to config file")
-    parser.add_argument("-s", "--save-dir", type=str, default="output_fgd/oxford_pets",
-                       help="directory to save training outputs")
+    parser.add_argument("-s", "--save-dir", type=str, default=None,
+                       help="directory to save training outputs (auto-generated if not specified)")
     parser.add_argument("-d", "--dataset", type=str, default="oxford_pets",
                        choices=["oxford_pets", "oxford_flowers", "stanford_cars", "food101", "caltech101", "sun397", "ucf101", "fgvc_aircraft", "dtd", "eurosat", "imagenet"],
                        help="dataset name")
@@ -183,9 +183,13 @@ def setup_cfg(args):
     if args.model_dir:
         cfg.MODEL_DIR = args.model_dir
     
-    # 设置保存目录
+    # 设置保存目录：自动按 trainer/shots/seed 分组
     if args.save_dir:
         cfg.OUTPUT_DIR = os.path.join(args.root, args.save_dir)
+    else:
+        shots = args.shots if args.shots else args.rate
+        save_dir = f"output_fgd/{args.dataset}/{args.trainer}/shots_{shots}/seed_{args.seed}"
+        cfg.OUTPUT_DIR = os.path.join(args.root, save_dir)
     
     # 设置随机种子
     cfg.SEED = args.seed

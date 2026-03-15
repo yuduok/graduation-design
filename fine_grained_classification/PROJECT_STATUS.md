@@ -1,187 +1,99 @@
-# 细粒度猫狗分类系统 - 项目完成报告
+# 细粒度猫狗分类系统 - 项目状态报告
 
-## 📋 项目概述
-
-**项目名称**: 基于提示词优化的细粒度猫狗分类系统  
-**技术栈**: PyTorch 2.4.1 + CLIP + Python 3.8  
-**数据集**: Oxford-IIIT Pets (7,390张图片, 37种猫狗品种)  
-**当前状态**: ✅ 全部测试通过，训练脚本已修复
+**项目名称**: 基于提示词优化的细粒度猫狗分类系统
+**技术栈**: PyTorch 2.4.1 + CLIP (RN50) + Python 3.8
+**数据集**: Oxford-IIIT Pets (7,390 张图片, 37 种猫狗品种)
+**更新时间**: 2026-03-14
 
 ---
 
-## ✅ 已完成模块
+## 一、系统架构
 
-### 1. 核心模型模块
+### 核心思路
 
-| 文件 | 功能 | 状态 |
-|------|------|------|
-| `models/dynamic_prompt.py` | 动态提示词优化 | ✅ 已修复维度错误 |
-| `models/custom_clip.py` | 自定义CLIP模型 | ✅ 已优化批量编码 |
-| `models/trainer.py` | 训练器 | ✅ 已修复属性错误 |
-| `models/breed_semantic.py` | 品种语义增强 | ✅ 测试通过 |
+在预训练 CLIP 模型基础上，冻结图像/文本编码器，仅训练**动态提示词模块**，使提示词能根据每张输入图片自适应调整，从而提升细粒度品种的区分能力。
 
-### 2. 训练与评估
+### 与 CoOp 基线的核心区别
 
-| 文件 | 功能 | 状态 |
-|------|------|------|
-| `train.py` | 主训练脚本 | ✅ 已修复所有配置问题 |
-| `evaluate.py` | 评估脚本 | ✅ 可运行 |
-| `test_core.py` | 核心功能测试 | ✅ 已通过 |
-| `test_demo.py` | Demo功能测试 | ✅ 已通过 |
-| `test_full.py` | 端到端测试 | ✅ 已通过 |
+| 特性 | CoOp（基线） | 本系统（DynamicPromptTrainer） |
+|------|-------------|-------------------------------|
+| 提示词生成 | **静态**：所有图片共享同一组可学习 ctx 向量 | **图像条件**：每张图片经 SoftPromptAdapter 生成独特偏移 |
+| 训练信号 | 均匀 Cross-Entropy loss | **难度加权 loss**：难样本梯度放大 2-4x |
+| 适应机制 | 无 | SoftPromptAdapter (512→64→512 双层 MLP) |
+| 原型追踪 | 无 | 动量更新类原型，计算样本到类中心距离 |
 
-### 3. 可视化与部署
+### 动态提示词工作流程
 
-| 文件 | 功能 | 状态 |
-|------|------|------|
-| `demo/pet_classifier_demo.py` | Streamlit演示 | ✅ 已修复导入路径 |
-| `web/app.py` | Flask API | ✅ 已修复导入路径 |
-| `run_demo.sh` | 启动脚本 | ✅ 完成 |
-| `train_quick.sh` | 快速训练脚本 | ✅ 完成 |
+```
+输入图片
+  ↓
+[冻结] CLIP 视觉编码器 → image_features [batch, 512]
+  ↓
+[可训练] SoftPromptAdapter MLP → 图片特定的 ctx 偏移 [batch, 512]
+  ↓
+基础 ctx（可学习）+ 偏移 → 图片条件提示词嵌入 [batch, n_cls, n_ctx, 512]
+  ↓
+[冻结] CLIP 文本编码器 → text_features [batch, n_cls, 512]
+  ↓
+logit_scale × (image_features @ text_features.T) → logits
+  ↓
+DifficultyWeightCalculator → 难度权重 w_i
+  ↓
+加权 CE loss = mean(w_i × CE_i) → 反向传播（仅更新 ctx + MLP）
+```
 
-### 4. 配置与文档
-
-| 文件 | 功能 | 状态 |
-|------|------|------|
-| `configs/dynamic_rn50.yaml` | 训练配置 | ✅ 已优化 |
-| `README.md` | 使用文档 | ✅ 完成 |
+**关键创新**: 同一只"波斯猫"，不同姿态/角度的图片会产生不同的提示词偏移，让模型关注该图片中最有区分力的特征。
 
 ---
 
-## 🔧 最近修复 (2026-03-11)
-
-### 1. Streamlit Demo (`demo/pet_classifier_demo.py`)
-- **问题**: 导入路径错误导致 `ImportError: attempted relative import with no known parent package`
-- **修复**: 将 `sys.path.insert(0, os.path.join(COOP_PATH, "clip"))` 改为 `sys.path.insert(0, COOP_PATH)`
-
-### 2. Flask API (`web/app.py`)
-- **问题**: 缺少 CoOp 路径配置
-- **修复**: 添加了正确的路径设置
-
-### 3. 训练脚本 (`train.py`)
-- **问题1**: 配置文件中的 `DATASET.SPLIT` 键在默认配置中不存在
-- **修复**: 添加了 `extend_cfg()` 函数，扩展配置节点
-- **问题2**: CoOp 路径使用相对路径导致模块导入失败
-- **修复**: 改为绝对路径 `/Users/yudu/Documents/毕业设计/CoOp`
-- **问题3**: 数据集名称不匹配（如 `oxford_pets` vs `OxfordPets`）
-- **修复**: 添加了数据集名称映射字典
-- **问题4**: 数据集路径错误
-- **修复**: 设置 `cfg.DATASET.ROOT = DATA_PATH`（`/Users/yudu/Documents/毕业设计/data`）
-
-### 4. 动态提示词 (`models/dynamic_prompt.py`)
-- **问题**: `SoftPromptAdapter.forward` 中多余的 `unsqueeze(0)` 导致维度错误
-- **修复**: 移除多余的维度扩展操作
-- **问题**: `AdaptivePromptLearner` 缺少 `current_weights` 属性
-- **修复**: 初始化 `self.current_weights = None`
-
-### 5. 自定义CLIP (`models/custom_clip.py`)
-- **问题**: 循环编码文本导致内存溢出（MPS out of memory）
-- **修复**: 改为批量编码，大幅减少内存占用
-- **问题**: logit 计算维度不匹配
-- **修复**: 修正矩阵乘法维度
-
-### 6. 训练器 (`models/trainer.py`)
-- **问题**: `current_epoch` 属性不存在
-- **修复**: 改为使用 `self.epoch`
-
----
-
-## 📁 自动生成的日志文件
-
-### 日志文件位置
-
-训练过程中会在 `output_fgd/oxford_pets/` 目录下自动生成以下文件：
+## 二、项目结构
 
 ```
-output_fgd/
-└── oxford_pets/
-    ├── log.txt                    # 当前训练日志
-    ├── log.txt-2026-03-11-14-11-54  # 历史日志备份
-    ├── log.txt-2026-03-11-14-13-22
-    └── tensorboard/                # TensorBoard 可视化日志
-        └── events.out.tfevents.*
-```
-
-### 日志生成机制
-
-这些日志文件由 **CoOp/dassl 框架** 自动生成：
-
-1. **log.txt 日志**
-   - 由 `dassl.utils.setup_logger()` 函数创建
-   - 路径：`/CoOp/dassl/dassl/utils/logger.py`
-   - 逻辑：如果 `log.txt` 已存在，会自动添加时间戳后缀保存历史版本
-   - 记录内容：训练进度、损失值、准确率、学习率等
-
-2. **TensorBoard 日志**
-   - 由 dassl 框架的 `TensorboardWriter` 自动创建
-   - 路径：`output_fgd/oxford_pets/tensorboard/`
-   - 记录内容：训练指标曲线、损失变化等
-   - 查看方式：`tensorboard --logdir=output_fgd/oxford_pets/tensorboard`
-
-### .gitignore 已配置
-
-已在项目根目录创建 `.gitignore` 文件，自动忽略以下内容：
-
-```
-# 训练输出
-output_fgd/
-*.pth
-*.pt
-
-# TensorBoard
-tensorboard/
-events.out.tfevents.*
-
-# 测试输出
-*_output.png
-
-# 数据集
-oxford_pets/
+fine_grained_classification/
+├── train.py                     # 训练入口（支持 CoOp/CoCoOp/DynamicPromptTrainer）
+├── evaluate.py                  # 评估脚本
+├── collect_results.py           # 实验结果汇总与图表生成
+├── run_experiments.sh           # 自动化批量实验脚本
+├── configs/
+│   └── dynamic_rn50.yaml        # 训练超参配置
+├── models/
+│   ├── custom_clip.py           # 自定义 CLIP（整合动态提示 + 语义增强）
+│   ├── dynamic_prompt.py        # AdaptivePromptLearner + SoftPromptAdapter
+│   ├── trainer.py               # DynamicPromptTrainer（注册到 Dassl）
+│   └── breed_semantic.py        # 品种属性库（37 品种的毛发/面部/体型特征）
+├── demo/
+│   └── pet_classifier_demo.py   # Streamlit 交互演示
+├── web/
+│   └── app.py                   # Flask REST API 服务
+└── utils/
+    └── helpers.py               # 可视化与度量工具
 ```
 
 ---
 
-## 🚀 快速使用
+## 三、训练超参数
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| Backbone | RN50 | CLIP ResNet-50 |
+| 优化器 | SGD | lr=0.002 |
+| 学习率调度 | Cosine Annealing | warmup 1 epoch |
+| 训练轮次 | 50 | - |
+| 批大小 | 32 | - |
+| 可学习 ctx 长度 | 4 tokens | 初始化为 "a photo of a" |
+| ctx 嵌入维度 | 512 | 与 CLIP 特征维度一致 |
+| SoftPromptAdapter | 512→64→512 | 双层 MLP + ReLU |
+| 难度权重 | 距离系数 0.5 + 误分类 ×2 | 动量原型更新(0.9) |
+
+---
+
+## 四、快速使用
 
 ### 环境准备
 
 ```bash
-# 使用CoOp项目已有的虚拟环境
 source /Users/yudu/Documents/毕业设计/CoOp/venv/bin/activate
-
-# 安装额外依赖
 pip install streamlit flask flask-cors matplotlib seaborn scikit-learn
-```
-
-### 测试命令
-
-```bash
-cd /Users/yudu/Documents/毕业设计/fine_grained_classification
-
-# 核心功能测试
-python test_core.py
-
-# Demo功能测试
-python test_demo.py
-
-# 端到端测试（使用真实数据集）
-python test_full.py
-```
-
-### 启动演示界面
-
-```bash
-streamlit run /Users/yudu/Documents/毕业设计/fine_grained_classification/demo/pet_classifier_demo.py
-# 访问 http://localhost:8501
-```
-
-### 启动API服务
-
-```bash
-cd /Users/yudu/Documents/毕业设计/fine_grained_classification/web
-source /Users/yudu/Documents/毕业设计/CoOp/venv/bin/activate
-python app.py
-# API: http://localhost:5001/api/classify
 ```
 
 ### 训练模型
@@ -189,110 +101,87 @@ python app.py
 ```bash
 cd /Users/yudu/Documents/毕业设计/fine_grained_classification
 
-# CPU 训练
-python train.py -d oxford_pets -e 50 -b 32 --shots 1
+# 单组实验（输出自动保存到 output_fgd/oxford_pets/{trainer}/shots_{n}/seed_{s}/）
+python train.py -d oxford_pets -e 50 -b 32 --shots 1 --trainer DynamicPromptTrainer --device cuda
 
-# MPS 训练 (Mac)
-python train.py -d oxford_pets -e 50 -b 32 --shots 1 --device mps
+# 批量运行全部 9 组对比实验
+bash run_experiments.sh cuda
+```
 
-# CUDA 训练 (有GPU时)
-python train.py -d oxford_pets -e 50 -b 32 --shots 1 --device cuda
+### 汇总结果
 
-# 小批量测试 (内存有限时)
-python train.py -d oxford_pets -e 2 -b 4 --shots 1
+```bash
+python collect_results.py --latex --plot
+```
+
+### 启动演示
+
+```bash
+# Streamlit 界面 → http://localhost:8501
+streamlit run demo/pet_classifier_demo.py
+
+# Flask API → http://localhost:5001
+cd web && python app.py
+# 使用训练模型: python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/seed_1/prompt_learner/model-best.pth.tar
 ```
 
 ---
 
-## 📊 预期实验结果
+## 五、当前进度
+
+### 已完成
+
+- [x] 核心模型模块（dynamic_prompt / custom_clip / trainer / breed_semantic）
+- [x] 训练流程（train.py 支持 3 种 trainer + few-shot 配置）
+- [x] Web 演示（Streamlit + Flask API）
+- [x] 所有单元测试通过（test_core / test_demo / test_full）
+- [x] Bug 修复：logit_scale 缺失、类名错误（36→37 类）、导入路径等
+
+### 待完成
+
+- [ ] 运行完整训练实验（9 组：3 方法 × 3 shot）
+  - [ ] DynamicPromptTrainer: 1-shot / 4-shot / 16-shot
+  - [ ] CoOp 基线: 1-shot / 4-shot / 16-shot
+  - [ ] CoCoOp 基线: 1-shot / 4-shot / 16-shot
+- [ ] 生成对比表格、学习曲线、混淆矩阵
+- [ ] 撰写论文实验章节
+
+### 预期实验结果
 
 | 方法 | 1-shot | 4-shot | 16-shot |
 |------|--------|--------|---------|
-| Zero-shot CLIP | ~60% | ~60% | ~60% |
+| Zero-shot CLIP | ~81% | ~81% | ~81% |
 | CoOp | ~75% | ~85% | ~90% |
+| CoCoOp | ~76% | ~86% | ~90% |
 | **Ours (Dynamic)** | ~78% | ~87% | ~91% |
 
 ---
 
-## 📁 项目结构
+## 六、已修复 Bug 记录
 
-```
-fine_grained_classification/
-├── train.py                      # 训练入口
-├── evaluate.py                   # 评估脚本
-├── test_core.py                  # 核心测试
-├── test_demo.py                  # Demo测试
-├── test_full.py                  # 端到端测试
-├── run_demo.sh                   # 启动演示
-├── train_quick.sh                # 快速训练
-├── PROJECT_STATUS.md             # 本文档
-├── README.md                     # 使用说明
-│
-├── configs/
-│   └── dynamic_rn50.yaml         # 训练配置
-│
-├── models/
-│   ├── __init__.py
-│   ├── custom_clip.py            # 自定义CLIP (已优化)
-│   ├── dynamic_prompt.py         # 动态提示词 (已修复)
-│   ├── trainer.py                # 训练器 (已修复)
-│   └── breed_semantic.py         # 语义增强
-│
-├── utils/
-│   └── helpers.py                # 工具函数
-│
-├── demo/
-│   └── pet_classifier_demo.py   # Streamlit演示 (已修复)
-│
-└── web/
-    └── app.py                   # Flask API (已修复)
-```
+### 2026-03-14：Web 界面准确率修复
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| 概率显示 ~3% | `logit_scale`(×100) 未乘 | `web/app.py` + `demo/pet_classifier_demo.py` 添加 `logit_scale * logits` |
+| 类名错误 | `Great_Dane` 应为 `great_pyrenees`；`German_Shorthaired_Pointer` 应为 `german_shorthaired` | 修正为数据集一致的 37 个类名 |
+| 缺少 1 个类 | 36 类，缺 `american_pit_bull_terrier` | 补齐 37 类 |
+
+修复后零样本实测：200 张随机图片 → **81.0%** Top-1 准确率，Top-1 概率通常 60-99%。
+
+### 2026-03-11：训练流程修复
+
+- `train.py`: 配置扩展 `extend_cfg()`、数据集名称映射、路径修正
+- `dynamic_prompt.py`: 移除多余 `unsqueeze(0)`、初始化 `current_weights`
+- `custom_clip.py`: 批量文本编码（解决 MPS 内存溢出）、矩阵乘法维度修正
+- `trainer.py`: `current_epoch` → `self.epoch`
+- `demo/pet_classifier_demo.py` + `web/app.py`: 导入路径修复
 
 ---
 
-## 📈 下一步工作
+## 七、创新点总结
 
-- [x] 核心模块测试通过
-- [x] Demo功能测试通过
-- [x] 端到端测试通过
-- [x] 训练脚本修复完成
-- [ ] 运行完整训练实验
-  - [ ] 1-shot 实验
-  - [ ] 4-shot 实验
-  - [ ] 16-shot 实验
-- [ ] 对比CoOp/CoCoOp基线方法
-- [ ] 绘制学习曲线
-- [ ] 生成混淆矩阵
-- [ ] 撰写论文实验章节
-
----
-
-## 💡 创新点总结
-
-1. **动态提示词调整机制** - 根据困难样本自适应修改提示词
-2. **难度加权损失** - 对难分类样本给予更高权重
-3. **品种语义增强** - 利用品种属性描述增强文本嵌入
-4. **可视化决策解释** - 展示预测结果和置信度
-
----
-
-**更新时间**: 2026-03-11 17:30  
-**测试环境**: MacBook Air M2, PyTorch 2.4.1, Python 3.8  
-**数据集**: Oxford-IIIT Pets (7,390张图片, 37类)  
-**状态**: 全部测试通过 ✅
-
----
-
-## 🎯 快速开始完整实验
-
-```bash
-# 1-shot实验
-cd /Users/yudu/Documents/毕业设计/fine_grained_classification
-python train.py -d oxford_pets -e 50 -b 32 --shots 1
-
-# 4-shot实验
-python train.py -d oxford_pets -e 50 -b 32 --shots 4
-
-# 16-shot实验
-python train.py -d oxford_pets -e 50 -b 32 --shots 16
-```
+1. **图像条件动态提示词** — 通过 SoftPromptAdapter 使每张图片获得独特的提示词偏移
+2. **难度加权损失** — DifficultyWeightCalculator 基于原型距离和误分类状态动态加权
+3. **品种语义增强** — 37 品种属性库（毛发/面部/体型/性格），支持多模板文本生成
+4. **端到端可视化** — Streamlit 界面 + Flask API，支持自定义提示词模板实时对比

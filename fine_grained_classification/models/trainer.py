@@ -205,7 +205,7 @@ class DynamicPromptTrainer(TrainerX):
         print("\n" + "="*50)
         print("Training completed!")
         print(f"Best accuracy: {self.best_result:.2%}")
-        print(f"Final epoch: {self.current_epoch}")
+        print(f"Final epoch: {self.epoch}")
         print("="*50 + "\n")
         
         # 调用父类的after_train
