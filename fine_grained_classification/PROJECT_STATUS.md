@@ -92,15 +92,14 @@ fine_grained_classification/
 ### 环境准备
 
 ```bash
-source /Users/yudu/Documents/毕业设计/CoOp/venv/bin/activate
+source ../CoOp/venv/bin/activate
 pip install streamlit flask flask-cors matplotlib seaborn scikit-learn
 ```
 
 ### 训练模型
 
 ```bash
-cd /Users/yudu/Documents/毕业设计/fine_grained_classification
-
+# 在 fine_grained_classification/ 目录下执行
 # 单组实验（输出自动保存到 output_fgd/oxford_pets/{trainer}/shots_{n}/seed_{s}/）
 python train.py -d oxford_pets -e 50 -b 32 --shots 1 --trainer DynamicPromptTrainer --device cuda
 
