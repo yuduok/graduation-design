@@ -38,10 +38,9 @@ env/
 .DS_Store
 Thumbs.db
 
-# Training outputs (logs, checkpoints, tensorboard)
-output_fgd/
-*.pth
-*.pt
+# Training logs and tensorboard (not model checkpoints)
+output_fgd/**/log.txt*
+output_fgd/**/tensorboard/
 
 # Dataset (should be downloaded separately)
 oxford_pets/
