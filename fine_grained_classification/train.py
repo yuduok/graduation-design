@@ -7,17 +7,19 @@ import os
 import sys
 
 # CoOp目录（与项目目录平行）
-COOP_PATH = "/Users/yudu/Documents/毕业设计/CoOp"
-if COOP_PATH not in sys.path:
+# 自动查找 CoOp 目录（相对于当前文件的上层目录）
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+COOP_PATH = os.path.join(PROJECT_ROOT, "CoOp")
+if os.path.exists(COOP_PATH) and COOP_PATH not in sys.path:
     sys.path.insert(0, COOP_PATH)
 
 # CoOp数据目录
-DATA_PATH = "/Users/yudu/Documents/毕业设计/data"
+DATA_PATH = os.path.join(PROJECT_ROOT, "data")
 
 # 项目根目录
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
 
 # 导入CoOp数据集模块（注册数据集）
 import datasets.oxford_pets
