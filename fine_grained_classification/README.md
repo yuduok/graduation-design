@@ -4,22 +4,36 @@
 
 ## 环境安装
 
-**Python 版本**: 3.8
+**本地 Python 版本**: 3.8+
+**云端 Python 版本**: 3.9+（推荐）
 
 ```bash
 # 1. 创建虚拟环境
-python3.8 -m venv venv
-source venv/bin/activate
+python -m venv venv
+source venv/bin/activate  # Linux/Mac: source venv/bin/activate
+                        # Windows: venv\Scripts\activate
 
 # 2. 安装依赖
 pip install -r requirements.txt
 
-# 3. 安装 CLIP（从 CoOp 目录中引用，无需额外安装）
+# 3. 安装 CLIP + Dassl
 #    CLIP 和 Dassl 已作为源码包含在 ../CoOp/ 目录中
-#    如果独立使用，需手动安装：
-#    pip install git+https://github.com/openai/CLIP.git
-#    cd ../CoOp/dassl && pip install -e .
+cd ../CoOp/dassl && pip install -e .
 ```
+
+### 云端部署
+
+```bash
+# 1. 拉取代码
+git clone <your-repo-url>
+cd graduation-design
+
+# 2. 安装依赖（根据云端 Python 版本选择合适的 torch 版本）
+pip install -r fine_grained_classification/requirements.txt
+
+# 3. 安装 Dassl（完整版，包含 dassl.data 模块）
+cd CoOp/dassl
+pip install -e .
 
 ## 数据准备
 

@@ -1,9 +1,9 @@
 # 细粒度猫狗分类系统 - 项目状态报告
 
 **项目名称**: 基于提示词优化的细粒度猫狗分类系统
-**技术栈**: PyTorch 2.4.1 + CLIP (RN50) + Python 3.8
+**技术栈**: PyTorch 2.4.1 + CLIP (RN50) + Python 3.8+
 **数据集**: Oxford-IIIT Pets (7,390 张图片, 37 种猫狗品种)
-**更新时间**: 2026-03-14
+**更新时间**: 2026-03-17
 
 ---
 
@@ -87,7 +87,62 @@ fine_grained_classification/
 
 ---
 
-## 四、快速使用
+## 四、云端部署
+
+### 服务器要求
+
+| 项目 | 要求 |
+|------|------|
+| Python | 3.9+ |
+| GPU | CUDA 11.0+ |
+| 内存 | 16GB+ |
+| 硬盘 | 10GB+ |
+
+### 云端部署步骤
+
+```bash
+# 1. 拉取代码
+git clone <your-repo-url>
+cd graduation-design
+
+# 2. 安装依赖
+cd fine_grained_classification
+pip install -r requirements.txt
+
+# 3. 安装 Dassl（关键！）
+cd ../CoOp/dassl
+pip install -e .
+
+# 4. 准备数据集
+mkdir -p ../data/oxford_pets
+# 下载数据集到 ../data/oxford_pets/
+
+# 5. 开始训练
+cd ../../fine_grained_classification
+python train.py -d oxford_pets -e 50 -b 32 --shots 1 --trainer DynamicPromptTrainer --device cuda
+```
+
+### 目录结构要求
+
+确保云端目录结构与本地一致：
+
+```
+graduation-design/
+├── CoOp/                      # CoOp 框架（含 CLIP + 完整 Dassl）
+│   ├── datasets/              # 数据集定义
+│   ├── trainers/              # 训练器
+│   └── dassl/                 # Dassl 完整仓库（包含 dassl.data）
+├── data/
+│   └── oxford_pets/           # 数据集
+├── fine_grained_classification/
+│   ├── train.py
+│   └── ...
+└── output_fgd/                # 训练输出
+```
+
+---
+
+## 五、快速使用
 
 ### 环境准备
 
@@ -105,12 +160,6 @@ python train.py -d oxford_pets -e 50 -b 32 --shots 1 --trainer DynamicPromptTrai
 
 # 批量运行全部 9 组对比实验
 bash run_experiments.sh cuda
-```
-
-### 汇总结果
-
-```bash
-python collect_results.py --latex --plot
 ```
 
 ### 启动演示
@@ -135,13 +184,15 @@ cd web && python app.py
 - [x] Web 演示（Streamlit + Flask API）
 - [x] 所有单元测试通过（test_core / test_demo / test_full）
 - [x] Bug 修复：logit_scale 缺失、类名错误（36→37 类）、导入路径等
+- [x] 云端部署支持：替换完整版 Dassl、修复 ftfy 版本、路径自动查找
 
 ### 待完成
 
-- [ ] 运行完整训练实验（9 组：3 方法 × 3 shot）
+- [ ] 云端运行完整训练实验（9 组：3 方法 × 3 shot）
   - [ ] DynamicPromptTrainer: 1-shot / 4-shot / 16-shot
   - [ ] CoOp 基线: 1-shot / 4-shot / 16-shot
   - [ ] CoCoOp 基线: 1-shot / 4-shot / 16-shot
+- [ ] 将训练好的模型同步回本地
 - [ ] 生成对比表格、学习曲线、混淆矩阵
 - [ ] 撰写论文实验章节
 
@@ -157,6 +208,28 @@ cd web && python app.py
 ---
 
 ## 六、已修复 Bug 记录
+
+### 2026-03-17：云端部署 dassl 模块缺失
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| `ModuleNotFoundError: No module named 'dassl.data'` | 原 CoOp/dassl 目录不完整，缺少 `dassl/data` 模块 | 用完整的 Dassl.pytorch 仓库替换，删除内部 .git 目录 |
+| `ftfy==6.3` 版本不存在 | pip 无法找到该版本 | 降级为 `ftfy==6.2.3` |
+| 路径硬编码 | train.py 使用本地绝对路径 `/Users/yudu/...` | 改为自动查找 CoOp 目录（相对于项目根目录） |
+
+修复步骤：
+```bash
+# 本地操作
+cd CoOp
+git clone https://github.com/KaiyangZhou/Dassl.pytorch.git temp_dassl
+rm -rf dassl
+mv temp_dassl dassl
+rm -rf dassl/.git  # 删除嵌套的 git 目录
+
+# 云端操作
+git pull
+cd CoOp/dassl && pip install -e .
+```
 
 ### 2026-03-14：Web 界面准确率修复
 
