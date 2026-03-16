@@ -18,9 +18,9 @@ ENV/
 
 # 模型输出和日志
 output/
-*.pth
-*.pth.tar
-*.pth.tar-*
+# *.pth
+# *.pth.tar
+# *.pth.tar-*
 
 # IDE
 .vscode/

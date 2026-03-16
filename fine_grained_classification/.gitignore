@@ -43,7 +43,7 @@ output_fgd/**/log.txt*
 output_fgd/**/tensorboard/
 
 # Dataset (should be downloaded separately)
-oxford_pets/
+# oxford_pets/  # 保留训练好的模型文件
 
 # Test outputs
 *_output.png
