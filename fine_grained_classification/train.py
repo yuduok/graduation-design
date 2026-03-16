@@ -14,6 +14,11 @@ COOP_PATH = os.path.join(PROJECT_ROOT, "CoOp")
 if os.path.exists(COOP_PATH) and COOP_PATH not in sys.path:
     sys.path.insert(0, COOP_PATH)
 
+# 添加 dassl 包路径（CoOp/dassl/dassl -> CoOp/dassl）
+DASSL_PATH = os.path.join(COOP_PATH, "dassl")
+if os.path.exists(DASSL_PATH) and DASSL_PATH not in sys.path:
+    sys.path.insert(0, DASSL_PATH)
+
 # CoOp数据目录
 DATA_PATH = os.path.join(PROJECT_ROOT, "data")
 
