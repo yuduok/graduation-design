@@ -12,12 +12,8 @@ def readme():
 def find_version():
     version_file = 'dassl/__init__.py'
     with open(version_file, 'r') as f:
-        content = f.read()
-    for line in content.split('\n'):
-        if line.startswith('__version__'):
-            version = line.split('=')[1].strip().strip('"').strip("'")
-            return version
-    return "0.6.3"
+        exec(compile(f.read(), version_file, 'exec'))
+    return locals()['__version__']
 
 
 def numpy_include():
