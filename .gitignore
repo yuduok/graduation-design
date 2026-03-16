@@ -1,5 +1,7 @@
 # 数据集文件夹
 data/
+# 但 CoOp/dassl/dassl/data 是代码模块，需要强制跟踪
+!CoOp/dassl/dassl/data/
 
 # 截图和汇报图片
 picture/
