@@ -70,8 +70,8 @@ def parse_args():
     parser.add_argument("-t", "--trainer", type=str, default="DynamicPromptTrainer",
                        choices=["CoOp", "CoCoOp", "DynamicPromptTrainer"],
                        help="trainer name")
-    parser.add_argument("-b", "--batch-size", type=int, default=8,
-                       help="batch size (default 8 to avoid OOM)")
+    parser.add_argument("-b", "--batch-size", type=int, default=16,
+                       help="batch size (default 16)")
     parser.add_argument("-e", "--epochs", type=int, default=None,
                        help="number of epochs")
     parser.add_argument("--seed", type=int, default=1,

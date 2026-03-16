@@ -202,14 +202,23 @@ class DynamicPromptTrainer(TrainerX):
     
     def after_train(self):
         """训练完成后的处理"""
+        # 先调用父类的 after_train（会执行测试）
+        super().after_train()
+        
+        # 父类测试后会更新 best_result（如果在 val 集上测试）
+        # 如果没有 val 集，需要从 test 结果获取
+        if self.best_result == -np.inf:
+            # 没有验证集，手动获取 test 结果
+            print("\nNo validation set, loading best model from test...")
+            self.load_model(self.output_dir)
+            test_result = self.test()
+            self.best_result = test_result
+        
         print("\n" + "="*50)
         print("Training completed!")
-        print(f"Best accuracy: {self.best_result:.2%}")
+        print(f"Best accuracy: {self.best_result:.2f}%")
         print(f"Final epoch: {self.epoch}")
         print("="*50 + "\n")
-        
-        # 调用父类的after_train
-        super().after_train()
     
     def load_model(self, directory, epoch=None):
         """加载模型"""
