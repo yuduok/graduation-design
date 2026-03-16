@@ -91,7 +91,7 @@ fine_grained_classification/
 
 ```bash
 # 单组实验（输出自动保存到 output_fgd/oxford_pets/{trainer}/shots_{n}/seed_{s}/）
-python train.py -d oxford_pets -e 50 -b 32 --shots 1 --trainer DynamicPromptTrainer --device cuda
+python train.py -d oxford_pets -e 50 -b 16 --shots 1 --trainer DynamicPromptTrainer --device cuda
 
 # 批量运行全部 9 组对比实验（3 方法 × 3 shot）
 bash run_experiments.sh cuda
