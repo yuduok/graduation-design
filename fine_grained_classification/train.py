@@ -3,8 +3,12 @@
 Training Script for Fine-Grained Classification with Dynamic Prompts
 """
 import argparse
+import gc
 import os
 import sys
+
+# CUDA 内存优化
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # CoOp目录（与项目目录平行）
 # 自动查找 CoOp 目录（相对于当前文件的上层目录）
@@ -66,8 +70,8 @@ def parse_args():
     parser.add_argument("-t", "--trainer", type=str, default="DynamicPromptTrainer",
                        choices=["CoOp", "CoCoOp", "DynamicPromptTrainer"],
                        help="trainer name")
-    parser.add_argument("-b", "--batch-size", type=int, default=None,
-                       help="batch size")
+    parser.add_argument("-b", "--batch-size", type=int, default=8,
+                       help="batch size (default 8 to avoid OOM)")
     parser.add_argument("-e", "--epochs", type=int, default=None,
                        help="number of epochs")
     parser.add_argument("--seed", type=int, default=1,
@@ -235,6 +239,13 @@ def main():
     print("\nEnvironment info:")
     print(collect_env_info())
     print()
+    
+    # CUDA 内存优化：训练前清理缓存
+    if args.device == "cuda":
+        import torch
+        torch.cuda.empty_cache()
+        gc.collect()
+        print("[Memory] GPU cache cleared before training\n")
     
     # 构建训练器
     trainer = build_trainer(cfg)
