@@ -187,7 +187,7 @@ class DynamicPromptTrainer(TrainerX):
             epoch_info = f"Epoch {self.epoch}"
             batch_info = f"Batch {self.batch_idx + 1}/{self.num_batches}"
             loss_info = f"Loss: {loss_summary['loss']:.4f}"
-            acc_info = f"Acc: {loss_summary['acc']:.2%}"
+            acc_info = f"Acc: {loss_summary['acc']:.2f}%"
             
             print(f"\n[Monitor] {epoch_info} | {batch_info} | {loss_info} | {acc_info}")
             

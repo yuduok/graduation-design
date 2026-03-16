@@ -259,18 +259,12 @@ def main():
         trainer.test()
         return
     
-    # 训练
+    # 训练（训练结束后会自动测试）
     print("\n" + "="*60)
     print("Starting training...")
     print("="*60 + "\n")
     
     trainer.train()
-    
-    # 测试
-    print("\n" + "="*60)
-    print("Testing...")
-    print("="*60 + "\n")
-    trainer.test()
 
 
 if __name__ == "__main__":
