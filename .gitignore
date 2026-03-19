@@ -49,4 +49,7 @@ tensorboard/
 .opencode
 .superset
 .claude
+.claude-flow
+.mcp.json
+CLAUDE.md
 opencode.jsonc
