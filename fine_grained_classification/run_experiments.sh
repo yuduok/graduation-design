@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 # 设备选择（可通过命令行参数覆盖）
 DEVICE="${1:-cuda}"
 EPOCHS="${2:-50}"
-BATCH_SIZE="${3:-32}"
+BATCH_SIZE="${3:-16}"
 DATASET="oxford_pets"
 SEED=1
 

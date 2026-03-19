@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument("--backbone", type=str, default="RN50",
                         choices=["RN50", "RN101", "ViT-B/32"],
                         help="CLIP backbone")
-    parser.add_argument("--batch-size", type=int, default=32,
+    parser.add_argument("--batch-size", type=int, default=16,
                         help="batch size")
     parser.add_argument("--top-k", type=int, default=5,
                         help="show top-k predictions")
