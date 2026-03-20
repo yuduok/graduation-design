@@ -2,6 +2,7 @@
 动态提示词训练器
 Trainer for Fine-Grained Classification with Dynamic Prompts
 """
+import math
 import os.path as osp
 import time
 
@@ -207,7 +208,7 @@ class DynamicPromptTrainer(TrainerX):
         
         # 父类测试后会更新 best_result（如果在 val 集上测试）
         # 如果没有 val 集，需要从 test 结果获取
-        if self.best_result == -np.inf:
+        if self.best_result == -math.inf:
             # 没有验证集，手动获取 test 结果
             print("\nNo validation set, loading best model from test...")
             self.load_model(self.output_dir)

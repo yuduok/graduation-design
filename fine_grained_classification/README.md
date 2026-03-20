@@ -106,41 +106,68 @@ python collect_results.py --latex --plot
 # Streamlit 界面 → http://localhost:8501
 streamlit run demo/pet_classifier_demo.py
 
-# Flask API → http://localhost:5001
+# Flask API → http://localhost:5001（zero-shot 模式）
 cd web && python app.py
 
-# 使用训练好的模型启动 API
+# 使用训练好的模型启动 API（动态提示词推理模式）
 python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/seed_1/prompt_learner/model-best.pth.tar
+```
+
+> 加载训练模型后，Web API 会自动切换为**动态提示词推理模式**：对每张上传图片，
+> 通过 `SoftPromptAdapter` 生成图像条件化的提示词再编码，而非使用固定文本模板。
+> API 响应中的 `mode` 字段标明当前模式（`"dynamic_prompt"` 或 `"zero_shot"`）。
+
+### 跨设备使用模型
+
+在远端 CUDA 服务器上训练的模型可以直接在本地 Mac (CPU/MPS) 上使用。PyTorch 模型文件
+保存的是纯数值张量，与训练设备无关。加载时会自动通过 `map_location` 映射到当前设备。
+
+```bash
+# 将远端训练好的模型拷贝到本地
+scp remote:/path/to/model-best.pth.tar ./output_fgd/
+
+# 本地 Mac 上直接启动（自动使用 CPU）
+python web/app.py --model ./output_fgd/model-best.pth.tar
 ```
 
 ## 核心方法
 
-### 动态提示词 vs CoOp
+### 动态提示词 vs CoOp vs CoCoOp
 
-| 特性 | CoOp（基线） | 本系统（DynamicPromptTrainer） |
-|------|-------------|-------------------------------|
-| 提示词生成 | 所有图片共享同一组可学习 ctx 向量 | 每张图片经 SoftPromptAdapter 生成独特偏移 |
-| 训练信号 | 均匀 Cross-Entropy loss | 难度加权 loss：难样本梯度放大 2-4x |
-| 适应机制 | 无 | SoftPromptAdapter (512→64→512 双层 MLP) |
+| 特性 | CoOp | CoCoOp | **本系统（DynamicPromptTrainer）** |
+|------|------|--------|----------------------------------|
+| 提示词类型 | 静态可学习 ctx | 图像条件偏移 | 图像条件偏移 + 难度自适应加权 |
+| 核心参数 | `ctx` | `ctx` + `meta_net` | `ctx` + `SoftPromptAdapter` + `DynamicPromptOptimizer` + `class_adaptive_factors` |
+| 是否感知图像 | 否 | 是 | 是 |
+| 是否感知难度 | 否 | 否 | **是（独有）** |
+| 损失函数 | 标准 CE | 标准 CE | **加权 CE（困难样本权重更大）** |
+| 提示词层数 | 单层静态 | 单层偏移 | **双层（MLP 偏移 + 类别自适应因子）** |
+
+### 三项核心创新
+
+1. **困难样本自适应加权** — `DifficultyWeightCalculator` 基于特征空间距离和误分类历史，动态调整每个样本的损失权重（误分类样本 ×2，远离类中心样本额外 +0.5×distance）
+2. **双层提示词调整** — 在 `SoftPromptAdapter` 的图像条件偏移之上叠加 `class_adaptive_factors`，为不同类别学习不同的提示词缩放
+3. **动量更新类别原型** — 训练过程中以 momentum=0.9 持续跟踪每个类别的特征中心，为难度评估提供稳定参考
 
 ### 工作流程
 
 ```
 输入图片 → [冻结] CLIP 视觉编码器 → image_features
          → [可训练] SoftPromptAdapter MLP → ctx 偏移
-         → 基础 ctx + 偏移 → 图片条件提示词
+         → 基础 ctx × class_adaptive_factors + 偏移 → 图片条件提示词
          → [冻结] CLIP 文本编码器 → 相似度计算
-         → DifficultyWeightCalculator → 加权 CE loss
-         → 反向传播（仅更新 ctx + MLP 参数）
+         → DifficultyWeightCalculator → 难度权重
+         → 加权 CE loss → 反向传播（仅更新 ctx + MLP + adaptive_factors）
 ```
 
 ### 核心模块
 
 | 模块 | 文件 | 说明 |
 |------|------|------|
-| AdaptivePromptLearner | `models/dynamic_prompt.py` | 图像条件提示词生成 |
-| SoftPromptAdapter | `models/dynamic_prompt.py` | 双层 MLP 生成 ctx 偏移 |
-| DifficultyWeightCalculator | `models/dynamic_prompt.py` | 基于原型距离的难度加权 |
+| AdaptivePromptLearner | `models/dynamic_prompt.py` | 整合双层提示词生成（偏移 + 类别因子） |
+| SoftPromptAdapter | `models/dynamic_prompt.py` | 512→64→512 双层 MLP 生成图像条件偏移 |
+| DynamicPromptOptimizer | `models/dynamic_prompt.py` | 难度权重计算 + 类别自适应因子 |
+| DifficultyWeightCalculator | `models/dynamic_prompt.py` | 基于原型距离 + 误分类历史的加权 |
 | BreedAttributeDatabase | `models/breed_semantic.py` | 37 品种属性库（毛发/面部/体型） |
 | SemanticEnhancer | `models/breed_semantic.py` | 多模板语义增强 |
 

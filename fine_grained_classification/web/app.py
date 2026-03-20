@@ -33,6 +33,7 @@ class PetClassifierAPI:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.clip_model = None
         self.prompt_learner = None
+        self.text_encoder = None
         self.classnames = None
         self.use_trained_model = model_path is not None
         self.model_path = model_path
@@ -72,30 +73,38 @@ class PetClassifierAPI:
         print("Model loaded successfully!")
     
     def load_trained_model(self, model_path):
-        """加载训练好的模型"""
+        """加载训练好的模型（包括动态提示词学习器和文本编码器）"""
         try:
             from dassl.utils import load_checkpoint
-            
+
             # 加载检查点
             checkpoint = load_checkpoint(model_path)
-            
+
             # 动态导入自定义模块
-            from models.custom_clip import CustomCLIPDynamic
+            from models.custom_clip import TextEncoder
             from models.dynamic_prompt import AdaptivePromptLearner
-            
+
             # 创建 prompt_learner
             self.prompt_learner = AdaptivePromptLearner(
                 cfg=self._create_cfg(),
                 classnames=self.classnames,
                 clip_model=self.clip_model
             )
-            
-            # 加载权重
-            self.prompt_learner.load_state_dict(checkpoint['state_dict'])
+
+            # 加载权重（忽略固定的 token 向量）
+            state_dict = checkpoint['state_dict']
+            state_dict.pop("token_prefix", None)
+            state_dict.pop("token_suffix", None)
+            self.prompt_learner.load_state_dict(state_dict, strict=False)
             self.prompt_learner = self.prompt_learner.to(self.device)
             self.prompt_learner.eval()
-            
-            print("Trained model loaded successfully!")
+
+            # 创建文本编码器（用于编码动态生成的提示词）
+            self.text_encoder = TextEncoder(self.clip_model)
+            self.text_encoder = self.text_encoder.to(self.device)
+            self.text_encoder.eval()
+
+            print("Trained model loaded successfully (with dynamic prompt pipeline)!")
         except Exception as e:
             print(f"Failed to load trained model: {e}")
             self.use_trained_model = False
@@ -137,42 +146,65 @@ class PetClassifierAPI:
         Args:
             image_tensor: 预处理后的图像tensor
             top_k: 返回Top-K结果
-            prompt_template: 自定义提示词模板，如 "a {cls} cat"，{cls}会被替换为类别名
+            prompt_template: 自定义提示词模板（仅 zero-shot 模式生效）
         """
         with torch.no_grad():
             # 编码图像
             image_features = self.clip_model.encode_image(image_tensor.float())
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            
-            # 生成提示词
-            if prompt_template and "{cls}" in prompt_template:
-                # 使用自定义模板
-                prompts = [prompt_template.format(cls=name.replace('_', ' ')) for name in self.classnames]
+
+            if self.use_trained_model and self.prompt_learner is not None:
+                # ====== 动态提示词推理路径 ======
+                # 1. 通过 prompt_learner 生成图像条件化的动态提示词
+                #    prompts: [1, n_cls, n_tkn, ctx_dim]
+                prompts = self.prompt_learner(image_features)
+
+                n_cls, n_tkn, ctx_dim = prompts.shape[1], prompts.shape[2], prompts.shape[3]
+
+                # 2. 展平为 [n_cls, n_tkn, ctx_dim] 送入文本编码器
+                prompts_flat = prompts.squeeze(0)  # [n_cls, n_tkn, ctx_dim]
+
+                # 3. 用文本编码器编码动态提示词
+                tokenized_prompts = self.prompt_learner.tokenized_prompts.to(self.device)
+                text_features = self.text_encoder(prompts_flat, tokenized_prompts)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+                # 4. 计算相似度
+                logit_scale = self.clip_model.logit_scale.exp()
+                logits = logit_scale * (image_features @ text_features.T).squeeze()
+                probs = logits.softmax(dim=-1)
+
+                # 构建提示词描述（标注为动态生成）
+                prompt_labels = [f"[dynamic] adaptive prompt for {name.replace('_', ' ')}"
+                                 for name in self.classnames]
             else:
-                # 默认提示词
-                prompts = [f"a photo of a {name.replace('_', ' ')}" for name in self.classnames]
-            
-            # 编码文本
-            tokens = clip.tokenize(prompts).to(self.device)
-            text_features = self.clip_model.encode_text(tokens)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-            
-            # 计算相似度（乘以 logit_scale 使概率分布更锐利）
-            logit_scale = self.clip_model.logit_scale.exp()
-            logits = logit_scale * (image_features @ text_features.T).squeeze()
-            probs = logits.softmax(dim=-1)
-            
+                # ====== Zero-shot 推理路径 ======
+                if prompt_template and "{cls}" in prompt_template:
+                    prompt_labels = [prompt_template.format(cls=name.replace('_', ' '))
+                                     for name in self.classnames]
+                else:
+                    prompt_labels = [f"a photo of a {name.replace('_', ' ')}"
+                                     for name in self.classnames]
+
+                tokens = clip.tokenize(prompt_labels).to(self.device)
+                text_features = self.clip_model.encode_text(tokens)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+                logit_scale = self.clip_model.logit_scale.exp()
+                logits = logit_scale * (image_features @ text_features.T).squeeze()
+                probs = logits.softmax(dim=-1)
+
             # Top-K
             top_probs, top_indices = torch.topk(probs, min(top_k, len(probs)))
-            
+
             results = []
             for prob, idx in zip(top_probs, top_indices):
                 results.append({
                     "breed": self.classnames[idx.item()].replace('_', ' '),
-                    "prompt": prompts[idx.item()],
+                    "prompt": prompt_labels[idx.item()],
                     "probability": round(prob.item(), 4)
                 })
-            
+
             return results
 
 
@@ -196,7 +228,8 @@ def classify():
         return jsonify({
             "success": True,
             "predictions": results,
-            "prompt_template": prompt_template
+            "prompt_template": prompt_template,
+            "mode": "dynamic_prompt" if classifier.use_trained_model else "zero_shot"
         })
     
     except Exception as e:
