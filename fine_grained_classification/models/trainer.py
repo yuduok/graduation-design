@@ -203,21 +203,17 @@ class DynamicPromptTrainer(TrainerX):
     
     def after_train(self):
         """训练完成后的处理"""
-        # 先调用父类的 after_train（会执行测试）
+        # 先调用父类的 after_train（会执行测试并打印结果）
         super().after_train()
-        
-        # 父类测试后会更新 best_result（如果在 val 集上测试）
-        # 如果没有 val 集，需要从 test 结果获取
-        if self.best_result == -math.inf:
-            # 没有验证集，手动获取 test 结果
-            print("\nNo validation set, loading best model from test...")
-            self.load_model(self.output_dir)
-            test_result = self.test()
-            self.best_result = test_result
-        
+
+        # 父类 after_train 已经完成测试，直接使用其结果
+        # best_result 为 -inf 说明没有验证集，但测试已在 super().after_train() 中完成
+        # 无需重复加载和测试
+
         print("\n" + "="*50)
         print("Training completed!")
-        print(f"Best accuracy: {self.best_result:.2f}%")
+        if self.best_result > -math.inf:
+            print(f"Best accuracy: {self.best_result:.2f}%")
         print(f"Final epoch: {self.epoch}")
         print("="*50 + "\n")
     
