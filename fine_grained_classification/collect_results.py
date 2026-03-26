@@ -417,7 +417,7 @@ def main():
     parser.add_argument(
         "--base-dir",
         type=str,
-        default="/Users/yudu/graduation-design/fine_grained_classification/output_fgd/oxford_pets",
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "output_fgd", "oxford_pets"),
         help="Base directory for experiment outputs",
     )
     parser.add_argument(
