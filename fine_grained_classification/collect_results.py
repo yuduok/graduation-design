@@ -66,15 +66,39 @@ def find_experiment_dirs(base_dir):
     return experiments
 
 
-def extract_accuracy_from_log(log_path):
-    """从 Dassl 日志中提取最终测试准确率"""
-    if not os.path.exists(log_path):
+def find_latest_log(dir_path):
+    """查找目录中最新/最完整的日志文件"""
+    log_files = []
+    if not os.path.isdir(dir_path):
+        return None
+    
+    for f in os.listdir(dir_path):
+        if f.startswith("log.txt"):
+            full_path = os.path.join(dir_path, f)
+            # 获取修改时间
+            mtime = os.path.getmtime(full_path)
+            log_files.append((mtime, full_path, f))
+    
+    if not log_files:
+        return None
+    
+    # 按修改时间排序，返回最新的
+    log_files.sort(key=lambda x: x[0], reverse=True)
+    return log_files[0][1]
+
+
+def extract_accuracy_from_log(log_dir_path):
+    """从日志目录中提取最终测试准确率"""
+    # 优先查找最新的日志文件
+    log_file = find_latest_log(log_dir_path)
+    
+    if not log_file or not os.path.exists(log_file):
         return None
 
     best_acc = None
     final_test_acc = None
 
-    with open(log_path, "r") as f:
+    with open(log_file, "r") as f:
         for line in f:
             # Dassl 格式: "accuracy: XX.X%"  或 "* accuracy: XX.X%"
             match = re.search(r"\*?\s*accuracy:\s*([\d.]+)%?", line, re.IGNORECASE)
@@ -104,13 +128,16 @@ def extract_accuracy_from_log(log_path):
     return best_acc if best_acc is not None else final_test_acc
 
 
-def extract_training_curve(log_path):
-    """从日志中提取训练曲线数据"""
-    if not os.path.exists(log_path):
+def extract_training_curve(log_dir_path):
+    """从日志目录中提取训练曲线数据"""
+    # 查找最新的日志文件
+    log_file = find_latest_log(log_dir_path)
+    
+    if not log_file or not os.path.exists(log_file):
         return []
 
     curve = []
-    with open(log_path, "r") as f:
+    with open(log_file, "r") as f:
         for line in f:
             # 查找 epoch 和 accuracy/loss 信息
             epoch_match = re.search(r"epoch\s*\[?(\d+)", line, re.IGNORECASE)
@@ -139,8 +166,8 @@ def collect_results(base_dir):
 
     results = {}
     for exp in experiments:
-        log_file = os.path.join(exp["path"], "log.txt")
-        acc = extract_accuracy_from_log(log_file)
+        # 直接传入目录路径，让函数自己找最新日志
+        acc = extract_accuracy_from_log(exp["path"])
 
         trainer = exp["trainer"]
         shots = exp["shots"]
@@ -357,8 +384,8 @@ def plot_learning_curves(base_dir, results):
             exp_data = results[trainer].get(shots, {})
             if not exp_data or not exp_data.get("path"):
                 continue
-            log_path = os.path.join(exp_data["path"], "log.txt")
-            curve = extract_training_curve(log_path)
+            # 直接传入目录路径
+            curve = extract_training_curve(exp_data["path"])
             if curve:
                 epochs = [c["epoch"] for c in curve if "acc" in c]
                 accs = [c["acc"] for c in curve if "acc" in c]
@@ -390,7 +417,7 @@ def main():
     parser.add_argument(
         "--base-dir",
         type=str,
-        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "output_fgd", "oxford_pets"),
+        default="/Users/yudu/graduation-design/fine_grained_classification/output_fgd/oxford_pets",
         help="Base directory for experiment outputs",
     )
     parser.add_argument(
