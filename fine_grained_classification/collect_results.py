@@ -15,73 +15,53 @@ def find_experiment_dirs(base_dir):
         print(f"Base directory not found: {base_dir}")
         return experiments
 
-    # 优先查找 CoOp 仓库的输出目录
-    coop_base = "/Users/yudu/Documents/毕业设计/CoOp/output/oxford_pets"
-    if os.path.exists(coop_base):
-        for name in os.listdir(coop_base):
-            full_path = os.path.join(coop_base, name)
-            if not os.path.isdir(full_path):
-                continue
-            
-            # 解析目录名，提取 trainer 和 shots
-            name_lower = name.lower()
-            
-            # CoOp 结果: coop_1shot_xxx, 1shot_final 等
-            if name.startswith("coop_") or name.startswith("CoOp"):
-                trainer = "CoOp"
-                # 提取 shot 数
-                match = re.search(r"(\d+)shot", name, re.IGNORECASE)
-                shots = int(match.group(1)) if match else 1
-                experiments.append({
-                    "trainer": trainer,
-                    "shots": shots,
-                    "seed": "default",
-                    "path": full_path,
-                })
-            # CoCoOp 结果: cocoop_1shot_xxx
-            elif name.startswith("cocoop_") or name.startswith("CoCoOp"):
-                trainer = "CoCoOp"
-                match = re.search(r"(\d+)shot", name, re.IGNORECASE)
-                shots = int(match.group(1)) if match else 1
-                experiments.append({
-                    "trainer": trainer,
-                    "shots": shots,
-                    "seed": "default",
-                    "path": full_path,
-                })
-    
-    # 查找本地 DynamicPromptTrainer 结果
+    # base_dir 下的三个文件夹: CoCoOp, CoOp, DynamicPromptTrainer
     for trainer in os.listdir(base_dir):
         trainer_dir = os.path.join(base_dir, trainer)
         if not os.path.isdir(trainer_dir):
             continue
+        
+        # 解析 trainer 名称
+        if trainer == "CoCoOp":
+            trainer_name = "CoCoOp"
+        elif trainer == "CoOp":
+            trainer_name = "CoOp"
+        elif trainer == "DynamicPromptTrainer":
+            trainer_name = "DynamicPromptTrainer"
+        else:
+            continue
+        
+        # 遍历 shots 目录
         for shots_dir in os.listdir(trainer_dir):
             if not shots_dir.startswith("shots_"):
                 continue
             shots = int(shots_dir.split("_")[1])
             full_path = os.path.join(trainer_dir, shots_dir)
+            
             # 查找 seed 子目录
-            for seed_dir in os.listdir(full_path):
-                if seed_dir.startswith("seed_"):
-                    seed_path = os.path.join(full_path, seed_dir)
-                    if os.path.isdir(seed_path):
-                        experiments.append({
-                            "trainer": trainer,
-                            "shots": shots,
-                            "seed": seed_dir,
-                            "path": seed_path,
-                        })
+            if os.path.isdir(full_path):
+                for seed_dir in os.listdir(full_path):
+                    if seed_dir.startswith("seed_"):
+                        seed_path = os.path.join(full_path, seed_dir)
+                        if os.path.isdir(seed_path):
+                            experiments.append({
+                                "trainer": trainer_name,
+                                "shots": shots,
+                                "seed": seed_dir,
+                                "path": seed_path,
+                            })
+            
             # 也检查直接在 shots 目录下的日志（兼容旧格式）
             log_file = os.path.join(full_path, "log.txt")
-            if os.path.exists(log_file) and not any(
-                e["path"] == full_path for e in experiments
-            ):
-                experiments.append({
-                    "trainer": trainer,
-                    "shots": shots,
-                    "seed": "default",
-                    "path": full_path,
-                })
+            if os.path.exists(log_file):
+                # 检查是否已存在相同路径
+                if not any(e["path"] == full_path for e in experiments):
+                    experiments.append({
+                        "trainer": trainer_name,
+                        "shots": shots,
+                        "seed": "default",
+                        "path": full_path,
+                    })
     
     return experiments
 
@@ -200,7 +180,7 @@ def filter_and_group_results(results):
     return filtered
 
 
-def print_comparison_table(results, zero_shot_acc=81.0):
+def print_comparison_table(results):
     """打印对比表格"""
     results = filter_and_group_results(results)
     
@@ -224,12 +204,6 @@ def print_comparison_table(results, zero_shot_acc=81.0):
     print(header)
     print("-" * 60)
 
-    # Zero-shot baseline
-    row = f"{'Zero-shot CLIP':<25s}"
-    for _ in shots_list:
-        row += f" | {zero_shot_acc:>6.1f}%"
-    print(row)
-
     # 各方法结果
     for trainer in trainers:
         display_name = trainer
@@ -247,7 +221,7 @@ def print_comparison_table(results, zero_shot_acc=81.0):
     print("=" * 60)
 
 
-def print_latex_table(results, zero_shot_acc=81.0):
+def print_latex_table(results):
     """生成 LaTeX 格式表格"""
     results = filter_and_group_results(results)
     
@@ -274,13 +248,6 @@ def print_latex_table(results, zero_shot_acc=81.0):
     header += " \\\\"
     print(header)
     print("\\midrule")
-
-    # Zero-shot
-    row = "Zero-shot CLIP"
-    for _ in shots_list:
-        row += f" & {zero_shot_acc:.1f}"
-    row += " \\\\"
-    print(row)
 
     # 各方法
     for trainer in trainers:
@@ -427,12 +394,6 @@ def main():
         help="Base directory for experiment outputs",
     )
     parser.add_argument(
-        "--zero-shot",
-        type=float,
-        default=81.0,
-        help="Zero-shot CLIP accuracy for comparison",
-    )
-    parser.add_argument(
         "--latex",
         action="store_true",
         help="Also output LaTeX table",
@@ -451,10 +412,10 @@ def main():
     results = collect_results(args.base_dir)
 
     if results:
-        print_comparison_table(results, args.zero_shot)
+        print_comparison_table(results)
 
         if args.latex:
-            print_latex_table(results, args.zero_shot)
+            print_latex_table(results)
 
         if args.plot:
             plot_learning_curves(args.base_dir, results)
@@ -467,7 +428,6 @@ def main():
             summary[trainer] = {}
             for shots, data in shots_data.items():
                 summary[trainer][str(int(shots))] = data.get("accuracy")
-        summary["zero_shot_clip"] = args.zero_shot
 
         with open(json_path, "w") as f:
             json.dump(summary, f, indent=2)
