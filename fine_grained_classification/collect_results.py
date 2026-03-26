@@ -15,6 +15,42 @@ def find_experiment_dirs(base_dir):
         print(f"Base directory not found: {base_dir}")
         return experiments
 
+    # 优先查找 CoOp 仓库的输出目录
+    coop_base = "/Users/yudu/Documents/毕业设计/CoOp/output/oxford_pets"
+    if os.path.exists(coop_base):
+        for name in os.listdir(coop_base):
+            full_path = os.path.join(coop_base, name)
+            if not os.path.isdir(full_path):
+                continue
+            
+            # 解析目录名，提取 trainer 和 shots
+            name_lower = name.lower()
+            
+            # CoOp 结果: coop_1shot_xxx, 1shot_final 等
+            if name.startswith("coop_") or name.startswith("CoOp"):
+                trainer = "CoOp"
+                # 提取 shot 数
+                match = re.search(r"(\d+)shot", name, re.IGNORECASE)
+                shots = int(match.group(1)) if match else 1
+                experiments.append({
+                    "trainer": trainer,
+                    "shots": shots,
+                    "seed": "default",
+                    "path": full_path,
+                })
+            # CoCoOp 结果: cocoop_1shot_xxx
+            elif name.startswith("cocoop_") or name.startswith("CoCoOp"):
+                trainer = "CoCoOp"
+                match = re.search(r"(\d+)shot", name, re.IGNORECASE)
+                shots = int(match.group(1)) if match else 1
+                experiments.append({
+                    "trainer": trainer,
+                    "shots": shots,
+                    "seed": "default",
+                    "path": full_path,
+                })
+    
+    # 查找本地 DynamicPromptTrainer 结果
     for trainer in os.listdir(base_dir):
         trainer_dir = os.path.join(base_dir, trainer)
         if not os.path.isdir(trainer_dir):
@@ -46,6 +82,7 @@ def find_experiment_dirs(base_dir):
                     "seed": "default",
                     "path": full_path,
                 })
+    
     return experiments
 
 
@@ -141,8 +178,32 @@ def collect_results(base_dir):
     return results
 
 
+def filter_and_group_results(results):
+    """过滤和整理结果，只保留 1, 4, 16 shot 的 CoOp, CoCoOp, DynamicPromptTrainer"""
+    filtered = {}
+    
+    # 只保留这三个模型
+    valid_trainers = {"CoOp", "CoCoOp", "DynamicPromptTrainer"}
+    valid_shots = {1, 4, 16}
+    
+    for trainer, shots_data in results.items():
+        if trainer not in valid_trainers:
+            continue
+        
+        if trainer not in filtered:
+            filtered[trainer] = {}
+        
+        for shots, data in shots_data.items():
+            if shots in valid_shots:
+                filtered[trainer][shots] = data
+    
+    return filtered
+
+
 def print_comparison_table(results, zero_shot_acc=81.0):
     """打印对比表格"""
+    results = filter_and_group_results(results)
+    
     trainers = sorted(results.keys())
     shots_list = sorted(
         set(s for t in results.values() for s in t.keys())
@@ -173,7 +234,7 @@ def print_comparison_table(results, zero_shot_acc=81.0):
     for trainer in trainers:
         display_name = trainer
         if trainer == "DynamicPromptTrainer":
-            display_name = "Ours (Dynamic)"
+            display_name = "Ours"
         row = f"{display_name:<25s}"
         for s in shots_list:
             acc = results[trainer].get(s, {}).get("accuracy")
@@ -188,6 +249,8 @@ def print_comparison_table(results, zero_shot_acc=81.0):
 
 def print_latex_table(results, zero_shot_acc=81.0):
     """生成 LaTeX 格式表格"""
+    results = filter_and_group_results(results)
+    
     trainers = sorted(results.keys())
     shots_list = sorted(
         set(s for t in results.values() for s in t.keys())
@@ -223,7 +286,7 @@ def print_latex_table(results, zero_shot_acc=81.0):
     for trainer in trainers:
         display_name = trainer
         if trainer == "DynamicPromptTrainer":
-            display_name = "\\textbf{Ours (Dynamic)}"
+            display_name = "\\textbf{Ours}"
         elif trainer == "CoOp":
             display_name = "CoOp"
         elif trainer == "CoCoOp":
@@ -247,6 +310,8 @@ def print_latex_table(results, zero_shot_acc=81.0):
 
 def plot_learning_curves(base_dir, results):
     """绘制学习曲线对比图"""
+    results = filter_and_group_results(results)
+    
     try:
         import matplotlib.pyplot as plt
         import matplotlib
@@ -265,7 +330,7 @@ def plot_learning_curves(base_dir, results):
         "CoCoOp": "#2ecc71",
     }
     labels = {
-        "DynamicPromptTrainer": "Ours (Dynamic)",
+        "DynamicPromptTrainer": "Ours",
         "CoOp": "CoOp",
         "CoCoOp": "CoCoOp",
     }
@@ -396,11 +461,12 @@ def main():
 
         # 保存结果到 JSON
         json_path = os.path.join(args.base_dir, "experiment_summary.json")
+        filtered_results = filter_and_group_results(results)
         summary = {}
-        for trainer, shots_data in results.items():
+        for trainer, shots_data in filtered_results.items():
             summary[trainer] = {}
             for shots, data in shots_data.items():
-                summary[trainer][str(shots)] = data.get("accuracy")
+                summary[trainer][str(int(shots))] = data.get("accuracy")
         summary["zero_shot_clip"] = args.zero_shot
 
         with open(json_path, "w") as f:
