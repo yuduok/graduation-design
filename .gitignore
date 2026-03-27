@@ -51,5 +51,6 @@ tensorboard/
 .claude
 .claude-flow
 .mcp.json
+.swarm
 CLAUDE.md
 opencode.jsonc
