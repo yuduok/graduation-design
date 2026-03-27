@@ -40,43 +40,44 @@ class DifficultyWeightCalculator:
             else:
                 self.breed_prototypes[label_idx] = center.detach()
     
-    def compute_weights(self, features, labels, predictions):
+    def compute_weights(self, features, labels, predictions=None):
         """
         计算样本难度权重
         Args:
             features: 图像特征 [batch_size, feature_dim]
             labels: 真实标签 [batch_size]
-            predictions: 预测结果 [batch_size, num_classes]
+            predictions: 预测结果 [batch_size, num_classes] (可选)
         Returns:
             weights: 每个样本的权重 [batch_size]
         """
         weights = []
-        
-        for i, (feat, label, pred) in enumerate(zip(features, labels, predictions)):
+
+        for i, (feat, label) in enumerate(zip(features, labels)):
             label_idx = label.item()
-            pred_idx = pred.argmax().item()
-            
+
             # 基础权重为1
             weight = 1.0
-            
+
             # 1. 特征距离权重：特征空间中距离类别中心越远，权重越高
             if label_idx in self.breed_prototypes:
                 distance = torch.norm(feat - self.breed_prototypes[label_idx])
                 weight += distance.item() * 0.5
-            
-            # 2. 误分类权重：误分类的样本权重更高
-            if label_idx != pred_idx:
-                weight *= 2.0
-                
-                # 记录误分类历史
-                if label_idx not in self.misclassification_history:
-                    self.misclassification_history[label_idx] = {}
-                if pred_idx not in self.misclassification_history[label_idx]:
-                    self.misclassification_history[label_idx][pred_idx] = 0
-                self.misclassification_history[label_idx][pred_idx] += 1
-            
+
+            # 2. 误分类权重（如果有 predictions）
+            if predictions is not None:
+                pred_idx = predictions[i].argmax().item()
+                if label_idx != pred_idx:
+                    weight *= 2.0
+
+                    # 记录误分类历史
+                    if label_idx not in self.misclassification_history:
+                        self.misclassification_history[label_idx] = {}
+                    if pred_idx not in self.misclassification_history[label_idx]:
+                        self.misclassification_history[label_idx][pred_idx] = 0
+                    self.misclassification_history[label_idx][pred_idx] += 1
+
             weights.append(weight)
-        
+
         return torch.tensor(weights, device=features.device)
 
 
@@ -116,19 +117,19 @@ class DynamicPromptOptimizer(nn.Module):
             labels: 真实标签 (训练时需要)
             predictions: 预测结果 (训练时需要)
         Returns:
-            ctx_expanded: 扩展后的上下文 [batch_size, n_cls, n_ctx, ctx_dim]
+            ctx: 上下文向量
+            weights: 难度权重 (训练时) 或 None (推理时)
         """
-        if self.training and labels is not None and predictions is not None:
-            # 计算难度权重（如果启用）
+        if self.training and labels is not None:
             if self.use_difficulty_weight and self.difficulty_calculator:
                 # 更新原型
                 self.difficulty_calculator.update_prototypes(features, labels)
-                # 计算权重
+                # 计算权重（如果有 predictions 用 predictions，否则仅用原型距离）
                 weights = self.difficulty_calculator.compute_weights(
                     features, labels, predictions
                 )
                 return self.ctx, weights
-        
+
         return self.ctx, None
     
     def get_adaptive_context(self, batch_size, n_cls):
@@ -298,37 +299,42 @@ class AdaptivePromptLearner(nn.Module):
         """
         # 获取基础上下文
         base_ctx = self.ctx  # [n_ctx, ctx_dim]
-        
-        # 如果启用动态优化且在训练模式
-        if self.training and self.dynamic_optimizer is not None:
-            _ctx, weights = self.dynamic_optimizer(image_features, labels, predictions)
-            if weights is not None:
-                # 将权重信息传递出去（用于损失计算）
-                self.current_weights = weights
+
+        # 应用类别自适应因子（如果有动态优化器）
+        if self.dynamic_optimizer is not None:
+            # class_adaptive_factors: [1, n_ctx, ctx_dim]
+            base_ctx = base_ctx * self.dynamic_optimizer.class_adaptive_factors.squeeze(0)
+
+            # 训练模式：计算难度权重
+            if self.training:
+                _ctx, weights = self.dynamic_optimizer(image_features, labels, predictions)
+                if weights is not None:
+                    self.current_weights = weights
+                else:
+                    self.current_weights = None
+            else:
+                self.current_weights = None
         else:
             self.current_weights = None
-        
+
         # 如果启用自适应调整
         if self.soft_prompt_adapter is not None:
-            # 获取自适应上下文
             ctx_shifted = self.soft_prompt_adapter(image_features, base_ctx, self.n_cls)
         else:
-            # 静态上下文扩展
             batch_size = image_features.shape[0]
             ctx = base_ctx.unsqueeze(0).unsqueeze(0)  # [1, 1, n_ctx, ctx_dim]
             ctx_shifted = ctx.expand(batch_size, self.n_cls, -1, -1)
-        
+
         # 构建完整提示词
         prefix = self.token_prefix.unsqueeze(0)  # [1, n_cls, 1, ctx_dim]
         suffix = self.token_suffix.unsqueeze(0)  # [1, n_cls, *, ctx_dim]
-        
-        # 批次维度扩展
+
         batch_size = ctx_shifted.shape[0]
         prefix = prefix.expand(batch_size, -1, -1, -1)
         suffix = suffix.expand(batch_size, -1, -1, -1)
-        
+
         # 拼接: [SOS, context tokens, CLS, EOS]
         prompts = torch.cat([prefix, ctx_shifted, suffix], dim=2)
         # [batch_size, n_cls, n_tkn, ctx_dim]
-        
+
         return prompts

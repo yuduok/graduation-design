@@ -3,7 +3,7 @@
 **项目名称**: 基于提示词优化的细粒度猫狗分类系统
 **技术栈**: PyTorch 2.4.1 + CLIP (RN50) + Python 3.8+
 **数据集**: Oxford-IIIT Pets (7,390 张图片, 37 种猫狗品种)
-**更新时间**: 2026-03-20
+**更新时间**: 2026-03-27
 
 ---
 
@@ -38,9 +38,9 @@
   ↓
 [冻结] CLIP 文本编码器 → text_features [batch, n_cls, 512]
   ↓
-logit_scale × (image_features @ text_features.T) → logits
+logit_scale × (image_features @ text_features.T) → 初始 logits
   ↓
-DifficultyWeightCalculator → 难度权重 w_i
+DifficultyWeightCalculator(原型距离 + 误分类反馈) → 难度权重 w_i
   ↓
 加权 CE loss = mean(w_i × CE_i) → 反向传播（仅更新 ctx + MLP + adaptive_factors）
 ```
@@ -209,18 +209,28 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/see
 - [ ] 生成对比表格、学习曲线、混淆矩阵
 - [ ] 撰写论文实验章节
 
-### 预期实验结果
+### 首轮实验结果（修复前 — 难度权重未生效）
 
 | 方法 | 1-shot | 4-shot | 16-shot |
 |------|--------|--------|---------|
-| Zero-shot CLIP | ~81% | ~81% | ~81% |
-| CoOp | ~75% | ~85% | ~90% |
-| CoCoOp | ~76% | ~86% | ~90% |
-| **Ours (Dynamic)** | ~78% | ~87% | ~91% |
+| CoOp | 83.3% | 87.9% | 88.3% |
+| CoCoOp | 88.0% | 89.0% | 90.0% |
+| **Ours (Dynamic)** | 84.9% | 88.0% | 90.1% |
+
+> 注：首轮实验中，难度权重和类别自适应因子因代码 bug 未生效，模型退化为"CoCoOp + 未使用的 DynamicPromptOptimizer"。修复后需重新训练。
 
 ---
 
 ## 六、已修复 Bug 记录
+
+### 2026-03-27：核心模块激活修复（难度权重 + 类别自适应因子）
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| 难度权重从未计算 | `DynamicPromptOptimizer.forward` 要求 `predictions is not None`，但 `CustomCLIPDynamic` 始终传 `None` | 改为两阶段前向：先生成初始 logits，再用 logits 作为 predictions 计算含误分类信息的权重 |
+| `class_adaptive_factors` 未参与计算 | `AdaptivePromptLearner.forward` 直接用 `self.ctx`，未乘以 adaptive_factors | 在 forward 中将 `base_ctx = self.ctx * class_adaptive_factors` |
+| `compute_weights` 无法处理 `predictions=None` | 用 `zip(features, labels, predictions)` 强制要求 predictions | 改为先仅用原型距离算基础权重，predictions 非 None 时再叠加误分类权重 |
+| 权重梯度回传冲突 | 难度权重不应参与梯度计算 | 在 trainer 中 `weights = weights.detach()` |
 
 ### 2026-03-20：Web 动态提示词推理 + 显存优化 + verbose 弃用
 

@@ -85,9 +85,6 @@ class CustomCLIPDynamic(nn.Module):
             self.semantic_enhancer = SemanticEnhancer(clip_model, use_attribute_database=use_attr_db)
         else:
             self.semantic_enhancer = None
-        
-        # 困难负样本权重
-        self.hard_negative_weights = None
     
     def forward(self, image, label=None):
         """
@@ -96,55 +93,58 @@ class CustomCLIPDynamic(nn.Module):
             image: 输入图像 [batch_size, 3, H, W]
             label: 标签 (训练时可选)
         Returns:
-            如果训练（有label）: logits [batch_size, n_cls]
-            如果推理（无label）: logits [batch_size, n_cls]
+            logits [batch_size, n_cls]
         """
         # 1. 编码图像
         image_features = self.image_encoder(image.type(self.dtype))
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        
+
         # 2. 生成动态提示词
         if self.training and label is not None:
-            # 训练模式：需要label和predictions
+            # 第一阶段：不带 predictions，仅用原型距离计算初始权重
             prompts = self.prompt_learner(image_features, label, predictions=None)
+            logits = self._encode_and_compute_logits(image_features, prompts)
+
+            # 第二阶段：用第一阶段的 logits 作为 predictions 更新权重（含误分类信息）
+            with torch.no_grad():
+                self.prompt_learner.dynamic_optimizer(
+                    image_features, label, logits.detach()
+                ) if self.prompt_learner.dynamic_optimizer is not None else None
+                # 重新计算权重（现在包含误分类信息）
+                if (self.prompt_learner.dynamic_optimizer is not None
+                        and self.prompt_learner.dynamic_optimizer.difficulty_calculator is not None):
+                    weights = self.prompt_learner.dynamic_optimizer.difficulty_calculator.compute_weights(
+                        image_features, label, logits.detach()
+                    )
+                    self.prompt_learner.current_weights = weights
         else:
             # 推理模式
             prompts = self.prompt_learner(image_features)
-        
-        # 3. 编码文本
-        # prompts shape: [batch_size, n_cls, n_tkn, ctx_dim]
-        batch_size, n_cls, n_tkn, _ = prompts.shape
-        
-        # 重塑为批量编码 [batch_size * n_cls, n_tkn, ctx_dim]
-        prompts_flat = prompts.view(-1, n_tkn, prompts.size(-1))  # [batch_size * n_cls, n_tkn, ctx_dim]
-        
-        # 为批量编码创建对应的 tokenized prompts (扩展到 batch_size * n_cls)
-        # self.tokenized_prompts: [n_cls, seq_len] -> [batch_size, n_cls, seq_len] -> [batch_size * n_cls, seq_len]
-        tokenized_prompts_batch = self.tokenized_prompts.unsqueeze(0).expand(batch_size, -1, -1).reshape(batch_size * n_cls, -1)
-        
-        # 批量编码所有提示词
-        text_features = self.text_encoder(prompts_flat, tokenized_prompts_batch)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-        
-        # 重塑回 [batch_size, n_cls, ctx_dim]
-        text_features = text_features.view(batch_size, n_cls, -1)
-        
-        # 计算logits: [batch_size, n_cls]
-        # image_features: [batch_size, ctx_dim]
-        # text_features: [batch_size, n_cls, ctx_dim]
-        # 需要: [batch_size, 1, ctx_dim] @ [batch_size, n_cls, ctx_dim].transpose(1,2) -> [batch_size, 1, n_cls]
-        logit_scale = self.logit_scale.exp()
-        image_features_3d = image_features.unsqueeze(1)  # [batch_size, 1, ctx_dim]
-        logits = logit_scale * (image_features_3d @ text_features.transpose(1, 2)).squeeze(1)
-        
-        # 4. 语义增强（如果启用）
+            logits = self._encode_and_compute_logits(image_features, prompts)
+
+        # 语义增强（如果启用）
         if self.semantic_enhancer is not None:
             logits = self._apply_semantic_enhancement(image_features, logits)
-        
-        # 5. 困难负样本加权（如果有）
-        if self.hard_negative_weights is not None:
-            logits = self._apply_hard_negative_weights(logits)
-        
+
+        return logits
+
+    def _encode_and_compute_logits(self, image_features, prompts):
+        """编码提示词并计算 logits"""
+        batch_size, n_cls, n_tkn, _ = prompts.shape
+
+        prompts_flat = prompts.view(-1, n_tkn, prompts.size(-1))
+        tokenized_prompts_batch = self.tokenized_prompts.unsqueeze(0).expand(
+            batch_size, -1, -1
+        ).reshape(batch_size * n_cls, -1)
+
+        text_features = self.text_encoder(prompts_flat, tokenized_prompts_batch)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        text_features = text_features.view(batch_size, n_cls, -1)
+
+        logit_scale = self.logit_scale.exp()
+        image_features_3d = image_features.unsqueeze(1)
+        logits = logit_scale * (image_features_3d @ text_features.transpose(1, 2)).squeeze(1)
+
         return logits
     
     def _apply_semantic_enhancement(self, image_features, logits):
@@ -159,22 +159,7 @@ class CustomCLIPDynamic(nn.Module):
         # 这里可以添加语义增强的逻辑
         # 例如：使用品种相似度调整logits
         return logits
-    
-    def _apply_hard_negative_weights(self, logits):
-        """
-        应用困难负样本权重
-        Args:
-            logits: [batch_size, n_cls]
-        Returns:
-            weighted_logits: [batch_size, n_cls]
-        """
-        if self.hard_negative_weights is None:
-            return logits
-        
-        # 对logits进行加权
-        weighted_logits = logits * self.hard_negative_weights
-        return weighted_logits
-    
+
     def get_prompt_tokens(self, image_features):
         """
         获取提示词tokens（用于可视化）

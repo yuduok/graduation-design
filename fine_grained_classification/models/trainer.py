@@ -114,21 +114,22 @@ class DynamicPromptTrainer(TrainerX):
                     # 获取难度权重（如果有）
                     weights = model.get_difficulty_weights()
                     if weights is not None:
+                        weights = weights.detach()  # 权重不参与梯度计算
                         loss = F.cross_entropy(output, label, weight=None, reduction='none')
                         # 加权损失
                         weighted_loss = (loss * weights).mean()
                         loss = weighted_loss
                     else:
                         loss = F.cross_entropy(output, label)
-            
+
             self.optim.zero_grad()
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optim)
             self.scaler.update()
-            
+
         else:
             output = model(image, label)
-            
+
             # 检查输出是否是loss（CoCoOp风格）
             if output.dim() == 0:  # scalar loss
                 loss = output
@@ -136,6 +137,7 @@ class DynamicPromptTrainer(TrainerX):
                 # 获取难度权重（如果有）
                 weights = model.get_difficulty_weights()
                 if weights is not None:
+                    weights = weights.detach()  # 权重不参与梯度计算
                     loss = F.cross_entropy(output, label, reduction='none')
                     # 加权损失
                     weighted_loss = (loss * weights).mean()

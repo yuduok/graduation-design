@@ -155,8 +155,8 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 输入图片 → [冻结] CLIP 视觉编码器 → image_features
          → [可训练] SoftPromptAdapter MLP → ctx 偏移
          → 基础 ctx × class_adaptive_factors + 偏移 → 图片条件提示词
-         → [冻结] CLIP 文本编码器 → 相似度计算
-         → DifficultyWeightCalculator → 难度权重
+         → [冻结] CLIP 文本编码器 → 初始 logits
+         → DifficultyWeightCalculator(原型距离 + 误分类反馈) → 难度权重
          → 加权 CE loss → 反向传播（仅更新 ctx + MLP + adaptive_factors）
 ```
 
