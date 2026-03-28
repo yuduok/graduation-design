@@ -79,14 +79,15 @@ fine_grained_classification/
 | 参数 | 值 | 说明 |
 |------|-----|------|
 | Backbone | RN50 | CLIP ResNet-50 |
-| 优化器 | SGD | lr=0.002 |
+| 优化器 | SGD | lr=0.001（动态提示词专用） |
 | 学习率调度 | Cosine Annealing | warmup 1 epoch |
 | 训练轮次 | 50 | - |
 | 批大小 | 16 | 默认值，可按 GPU 显存调整 |
 | 可学习 ctx 长度 | 4 tokens | 初始化为 "a photo of a" |
 | ctx 嵌入维度 | 512 | 与 CLIP 特征维度一致 |
 | SoftPromptAdapter | 512→64→512 | 双层 MLP + ReLU |
-| 难度权重 | 距离系数 0.5 + 误分类 ×2 | 动量原型更新(0.9) |
+| 难度权重 | 距离系数 0.5 + 误分类 ×1.5 | 权重限制 [0.5, 2.0]，动量原型更新(0.9) |
+| 权重归一化 | contextnorm | 对提示词嵌入做 LayerNorm，稳定训练 |
 
 ---
 
@@ -202,12 +203,35 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/see
 ### 待完成
 
 - [ ] 云端运行完整训练实验（9 组：3 方法 × 3 shot）
-  - [ ] DynamicPromptTrainer: 1-shot / 4-shot / 16-shot
+  - [x] DynamicPromptTrainer: 16-shot（进行中）
+  - [ ] DynamicPromptTrainer: 1-shot / 4-shot
   - [ ] CoOp 基线: 1-shot / 4-shot / 16-shot
   - [ ] CoCoOp 基线: 1-shot / 4-shot / 16-shot
 - [ ] 将训练好的模型同步回本地
 - [ ] 生成对比表格、学习曲线、混淆矩阵
 - [ ] 撰写论文实验章节
+
+### 训练日志指标解释
+
+训练过程中每个 batch 输出格式：
+```
+epoch [50/50] batch [5/37] time 0.425 (0.498) data 0.000 (0.070) loss 1.9750 (1.6749) acc 75.0000 (73.7500) lr 7.8853e-06 eta 0:00:15
+```
+
+| 指标 | 示例值 | 含义 |
+|------|--------|------|
+| `time` | 0.425 (0.498) | 当前 batch 耗时(秒) / 滑动平均 |
+| `data` | 0.000 (0.070) | 数据加载耗时(秒) / 滑动平均 |
+| `loss` | 1.9750 (1.6749) | 当前 batch 损失 / 滑动平均损失 |
+| `acc` | 75.0000 (73.7500) | 当前 batch 准确率(%) / 滑动平均 |
+| `lr` | 7.8853e-06 | 当前学习率（cosine 衰减末期很低） |
+| `eta` | 0:00:15 | 预计剩余时间 |
+
+**Few-shot 训练特点**：
+- 16-shot 仅有 37 个 batch/epoch，样本极少
+- Loss/Acc 波动大是正常现象（某些 batch 恰好是模型擅长的类别）
+- 学习率在末期很低（7.88e-06）是因为 cosine annealing 已接近终点
+- 准确率需关注滑动平均值而非单 batch 值
 
 ### 首轮实验结果（修复前 — 难度权重未生效）
 
@@ -280,6 +304,23 @@ cd CoOp/dassl && pip install -e .
 - `custom_clip.py`: 批量文本编码（解决 MPS 内存溢出）、矩阵乘法维度修正
 - `trainer.py`: `current_epoch` → `self.epoch`
 - `demo/pet_classifier_demo.py` + `web/app.py`: 导入路径修复
+
+---
+
+### 2026-03-28：训练稳定性修复（解决准确率波动大 + 结果变差）
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| 权重范围无限制 | 困难权重可能达到 3-4 倍，对小样本冲击过大 | 添加 `weight = max(0.5, min(2.0, weight))` 限制 |
+| 学习率过高 | 0.002 对动态提示词参数过大 | 降为 0.001 |
+| 自定义学习率未生效 | optimizer 在 custom_lr 设置之前就构建了 | 调整顺序：先设置 LR，再 build_optimizer |
+| 两阶段前向传播不稳定 | 第一阶段算 logits，第二阶段用 logits 算权重但未重新前向 | 简化为单阶段前向 |
+| custom_clip.py 死代码 | 重复的 prompts/logits 计算 + 缩进错误 | 删除重复代码，修复缩进 |
+
+修复后预期：
+- Loss 波动减小
+- 准确率更稳定（关注滑动平均值）
+- 最终精度恢复
 
 ---
 

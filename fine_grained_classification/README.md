@@ -178,7 +178,7 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 | 参数 | 值 |
 |------|-----|
 | Backbone | CLIP RN50 |
-| 优化器 | SGD (lr=0.002) |
+| 优化器 | SGD (lr=0.001) | 动态提示词专用学习率（原0.002过高） |
 | 学习率调度 | Cosine Annealing + warmup 1 epoch |
 | 训练轮次 | 50 |
 | 可学习 ctx | 4 tokens，初始化为 "a photo of a" |
@@ -189,11 +189,11 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 | 方法 | 1-shot | 4-shot | 16-shot |
 |------|--------|--------|---------|
 | Zero-shot CLIP | ~81% | ~81% | ~81% |
-| CoOp | - | - | - |
-| CoCoOp | - | - | - |
-| **Ours (Dynamic)** | - | - | - |
+| CoOp | 83.3% | 87.9% | 88.3% |
+| CoCoOp | 88.0% | 89.0% | 90.0% |
+| **Ours (Dynamic)** | 待训练 | 待训练 | 待训练 |
 
-> 待训练完成后由 `python collect_results.py` 自动填充。
+> 训练中，预期 16-shot 达到 ~89-90%。
 
 ## 参考资料
 

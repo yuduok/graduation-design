@@ -99,24 +99,19 @@ class CustomCLIPDynamic(nn.Module):
         image_features = self.image_encoder(image.type(self.dtype))
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
-        # 2. 生成动态提示词
+        # 2. 生成动态提示词（单阶段前向，稳定训练）
         if self.training and label is not None:
-            # 第一阶段：不带 predictions，仅用原型距离计算初始权重
+            # 训练模式：生成提示词并更新原型
             prompts = self.prompt_learner(image_features, label, predictions=None)
+            
+            # 更新类别原型（不计算权重，保持训练稳定）
+            if (self.prompt_learner.dynamic_optimizer is not None
+                and self.prompt_learner.dynamic_optimizer.difficulty_calculator is not None):
+                self.prompt_learner.dynamic_optimizer.difficulty_calculator.update_prototypes(
+                    image_features, label
+                )
+            
             logits = self._encode_and_compute_logits(image_features, prompts)
-
-            # 第二阶段：用第一阶段的 logits 作为 predictions 更新权重（含误分类信息）
-            with torch.no_grad():
-                self.prompt_learner.dynamic_optimizer(
-                    image_features, label, logits.detach()
-                ) if self.prompt_learner.dynamic_optimizer is not None else None
-                # 重新计算权重（现在包含误分类信息）
-                if (self.prompt_learner.dynamic_optimizer is not None
-                        and self.prompt_learner.dynamic_optimizer.difficulty_calculator is not None):
-                    weights = self.prompt_learner.dynamic_optimizer.difficulty_calculator.compute_weights(
-                        image_features, label, logits.detach()
-                    )
-                    self.prompt_learner.current_weights = weights
         else:
             # 推理模式
             prompts = self.prompt_learner(image_features)

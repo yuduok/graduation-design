@@ -61,13 +61,13 @@ class DifficultyWeightCalculator:
             # 1. 特征距离权重：特征空间中距离类别中心越远，权重越高
             if label_idx in self.breed_prototypes:
                 distance = torch.norm(feat - self.breed_prototypes[label_idx])
-                weight += distance.item() * 0.5
+                weight += 0.5 * torch.sigmoid(distance - 1.0)
 
             # 2. 误分类权重（如果有 predictions）
             if predictions is not None:
                 pred_idx = predictions[i].argmax().item()
                 if label_idx != pred_idx:
-                    weight *= 2.0
+                    weight *= 1.5
 
                     # 记录误分类历史
                     if label_idx not in self.misclassification_history:
@@ -76,6 +76,8 @@ class DifficultyWeightCalculator:
                         self.misclassification_history[label_idx][pred_idx] = 0
                     self.misclassification_history[label_idx][pred_idx] += 1
 
+            # 限制权重范围
+            weight = max(0.5, min(2.0, weight))
             weights.append(weight)
 
         return torch.tensor(weights, device=features.device)
