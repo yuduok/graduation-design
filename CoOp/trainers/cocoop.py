@@ -246,6 +246,8 @@ class CoCoOp(TrainerX):
             self.model = nn.DataParallel(self.model)
 
     def forward_backward(self, batch):
+        from dassl.metrics import compute_accuracy
+        
         image, label = self.parse_batch_train(batch)
 
         model = self.model
@@ -255,18 +257,25 @@ class CoCoOp(TrainerX):
         prec = self.cfg.TRAINER.COCOOP.PREC
         if prec == "amp":
             with autocast():
-                loss = model(image, label)
+                output = model(image, label)
             optim.zero_grad()
-            scaler.scale(loss).backward()
+            scaler.scale(output).backward()
             scaler.step(optim)
             scaler.update()
+            loss = output
         else:
-            loss = model(image, label)
+            output = model(image, label)
             optim.zero_grad()
-            loss.backward()
+            output.backward()
             optim.step()
+            loss = output
 
-        loss_summary = {"loss": loss.item()}
+        # 计算准确率（需要不带 label 调用以获取 logits）
+        with torch.no_grad():
+            logits = model(image, label=None)  # 不传 label，返回 logits 而非 loss
+            acc = compute_accuracy(logits, label)[0].item()
+
+        loss_summary = {"loss": loss.item(), "acc": acc}
 
         if (self.batch_idx + 1) == self.num_batches:
             self.update_lr()

@@ -186,12 +186,12 @@ def collect_results(base_dir):
 
 
 def filter_and_group_results(results):
-    """过滤和整理结果，只保留 1, 4, 16 shot 的 CoOp, CoCoOp, DynamicPromptTrainer"""
+    """过滤和整理结果，只保留 1, 4, 16, 32 shot 的 CoOp, CoCoOp, DynamicPromptTrainer"""
     filtered = {}
     
     # 只保留这三个模型
     valid_trainers = {"CoOp", "CoCoOp", "DynamicPromptTrainer"}
-    valid_shots = {1, 4, 16}
+    valid_shots = {1, 4, 16, 32}
     
     for trainer, shots_data in results.items():
         if trainer not in valid_trainers:
