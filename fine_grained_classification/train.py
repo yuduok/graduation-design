@@ -138,7 +138,7 @@ def extend_cfg(cfg):
     cfg.TRAINER.DYNAMIC.USE_SEMANTIC_ENHANCEMENT = False
     cfg.TRAINER.DYNAMIC.USE_ATTRIBUTE_DATABASE = True
     cfg.TRAINER.DYNAMIC.MONITOR_INTERVAL = 60
-cfg.TRAINER.DYNAMIC.LR = 0.001  # 降低学习率（原0.002对动态提示词过高）
+    cfg.TRAINER.DYNAMIC.LR = 0.001  # 降低学习率（原0.002对动态提示词过高）
 
 
 def setup_cfg(args):
