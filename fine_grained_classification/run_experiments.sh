@@ -1,6 +1,6 @@
 #!/bin/bash
 # 自动化实验脚本 - 运行全部对比实验
-# 3 个方法 (DynamicPromptTrainer, CoOp, CoCoOp) × 3 个 shot 设置 (1, 4, 16)
+# 3 个方法 (DynamicPromptTrainer, CoOp, CoCoOp) × 4 个 shot 设置 (1, 4, 16, 32)
 
 set -e
 
@@ -26,7 +26,7 @@ echo "=============================================="
 echo ""
 
 TRAINERS=("DynamicPromptTrainer" "CoOp" "CoCoOp")
-SHOTS_LIST=(1 4 16)
+SHOTS_LIST=(1 4 16 32)
 
 TOTAL=$((${#TRAINERS[@]} * ${#SHOTS_LIST[@]}))
 CURRENT=0
@@ -38,8 +38,19 @@ echo "==========================================" >> "$RESULTS_LOG"
 for TRAINER in "${TRAINERS[@]}"; do
     for SHOTS in "${SHOTS_LIST[@]}"; do
         CURRENT=$((CURRENT + 1))
+        
+        # 根据 shot 数量动态设置 epochs（防止过拟合）
+        # shot 越少，需要越多 epochs 才能拟合
+        case $SHOTS in
+            1)  EPOCHS=200 ;;
+            4)  EPOCHS=100 ;;
+            16) EPOCHS=50 ;;
+            32) EPOCHS=30 ;;
+            *)  EPOCHS=50 ;;
+        esac
+        
         echo ""
-        echo "[$CURRENT/$TOTAL] Running: $TRAINER with $SHOTS-shot"
+        echo "[$CURRENT/$TOTAL] Running: $TRAINER with $SHOTS-shot (epochs=$EPOCHS)"
         echo "----------------------------------------------"
 
         START_TIME=$(date +%s)

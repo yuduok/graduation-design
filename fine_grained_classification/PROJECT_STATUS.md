@@ -205,8 +205,8 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/see
 - [ ] 云端运行完整训练实验（9 组：3 方法 × 3 shot）
   - [x] DynamicPromptTrainer: 16-shot（进行中）
   - [ ] DynamicPromptTrainer: 1-shot / 4-shot
-  - [ ] CoOp 基线: 1-shot / 4-shot / 16-shot
-  - [ ] CoCoOp 基线: 1-shot / 4-shot / 16-shot
+  - [ ] CoOp 基线: 1-shot / 4-shot / 16-shot / 32-shot
+  - [ ] CoCoOp 基线: 1-shot / 4-shot / 16-shot / 32-shot
 - [ ] 将训练好的模型同步回本地
 - [ ] 生成对比表格、学习曲线、混淆矩阵
 - [ ] 撰写论文实验章节
@@ -235,11 +235,11 @@ epoch [50/50] batch [5/37] time 0.425 (0.498) data 0.000 (0.070) loss 1.9750 (1.
 
 ### 首轮实验结果（修复前 — 难度权重未生效）
 
-| 方法 | 1-shot | 4-shot | 16-shot |
-|------|--------|--------|---------|
-| CoOp | 83.3% | 87.9% | 88.3% |
-| CoCoOp | 88.0% | 89.0% | 90.0% |
-| **Ours (Dynamic)** | 84.9% | 88.0% | 90.1% |
+| 方法 | 1-shot | 4-shot | 16-shot | 32-shot |
+|------|--------|--------|---------|---------|
+| CoOp | 83.3% | 87.9% | 88.3% | - |
+| CoCoOp | 88.0% | 89.0% | 90.0% | - |
+| **Ours (Dynamic)** | 84.9% | 88.0% | 90.1% | - |
 
 > 注：首轮实验中，难度权重和类别自适应因子因代码 bug 未生效，模型退化为"CoCoOp + 未使用的 DynamicPromptOptimizer"。修复后需重新训练。
 
