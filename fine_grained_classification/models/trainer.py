@@ -73,37 +73,37 @@ class DynamicPromptTrainer(TrainerX):
                 params_to_optimize.append(param)
                 print(f"Optimizing: {name}")
         
-    # 如果有自定义学习率，则覆盖cfg.OPTIM中的LR
-    optim_cfg = cfg.OPTIM.clone()
-    custom_lr = getattr(cfg.TRAINER.DYNAMIC, 'LR', None)
-    if custom_lr is not None:
-        optim_cfg.LR = custom_lr
-        print(f"[DynamicPromptTrainer] Using custom LR: {custom_lr}")
+        # 如果有自定义学习率，则覆盖cfg.OPTIM中的LR
+        optim_cfg = cfg.OPTIM.clone()
+        custom_lr = getattr(cfg.TRAINER.DYNAMIC, 'LR', None)
+        if custom_lr is not None:
+            optim_cfg.LR = custom_lr
+            print(f"[DynamicPromptTrainer] Using custom LR: {custom_lr}")
 
-    # 使用修改后的optim_cfg构建优化器和调度器
-    self.optim = build_optimizer(
-        nn.ParameterList(params_to_optimize), 
-        optim_cfg
-    )
-    self.sched = build_lr_scheduler(self.optim, optim_cfg)
-    
-    # 注册模型
-    self.register_model("prompt_learner", self.model.prompt_learner, self.optim, self.sched)
-    if hasattr(self.model, 'semantic_enhancer') and self.model.semantic_enhancer is not None:
-        self.register_model("semantic_enhancer", self.model.semantic_enhancer, self.optim, self.sched)
-    
-    # 混合精度训练
-    self.scaler = GradScaler() if prec == "amp" else None
-    
-    # 多GPU
-    device_count = torch.cuda.device_count()
-    if device_count > 1:
-        print(f"Multiple GPUs detected (n_gpus={device_count}), use all of them!")
-        self.model = nn.DataParallel(self.model)
-    
-    # 训练监控
-    self.last_monitor_time = time.time()
-    self.monitor_interval = getattr(cfg.TRAINER.DYNAMIC, 'MONITOR_INTERVAL', 60)  # 默认60秒
+        # 使用修改后的optim_cfg构建优化器和调度器
+        self.optim = build_optimizer(
+            nn.ParameterList(params_to_optimize), 
+            optim_cfg
+        )
+        self.sched = build_lr_scheduler(self.optim, optim_cfg)
+        
+        # 注册模型
+        self.register_model("prompt_learner", self.model.prompt_learner, self.optim, self.sched)
+        if hasattr(self.model, 'semantic_enhancer') and self.model.semantic_enhancer is not None:
+            self.register_model("semantic_enhancer", self.model.semantic_enhancer, self.optim, self.sched)
+        
+        # 混合精度训练
+        self.scaler = GradScaler() if prec == "amp" else None
+        
+        # 多GPU
+        device_count = torch.cuda.device_count()
+        if device_count > 1:
+            print(f"Multiple GPUs detected (n_gpus={device_count}), use all of them!")
+            self.model = nn.DataParallel(self.model)
+        
+        # 训练监控
+        self.last_monitor_time = time.time()
+        self.monitor_interval = getattr(cfg.TRAINER.DYNAMIC, 'MONITOR_INTERVAL', 60)  # 默认60秒
 
     def forward_backward(self, batch):
         """前向和反向传播"""
