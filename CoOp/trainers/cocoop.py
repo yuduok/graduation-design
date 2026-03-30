@@ -188,7 +188,8 @@ class CustomCLIP(nn.Module):
             logits.append(l_i)
         logits = torch.stack(logits)
         
-        if self.prompt_learner.training:
+        # 训练时且 label 不为 None 才计算 loss
+        if self.prompt_learner.training and label is not None:
             return F.cross_entropy(logits, label)
         
         return logits

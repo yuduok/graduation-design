@@ -90,14 +90,25 @@ fine_grained_classification/
 ### 训练模型
 
 ```bash
-# 单组实验（输出自动保存到 output_fgd/oxford_pets/{trainer}/shots_{n}/seed_{s}/）
-python train.py -d oxford_pets -e 50 -b 16 --shots 1 --trainer DynamicPromptTrainer --device cuda
+# 单个模型训练（可自定义 trainer / shots / epochs）
+python train.py -d oxford_pets -t DynamicPromptTrainer --shots 16 -e 60 --device cuda
 
-# 批量运行全部 9 组对比实验（3 方法 × 3 shot）
-bash run_experiments.sh cuda
+# 参数说明：
+#   -t, --trainer    模型类型: DynamicPromptTrainer, CoOp, CoCoOp
+#   --shots          Few-shot 数量: 1, 4, 16, 32
+#   -e, --epochs     训练轮次
+#   -d, --dataset    数据集: oxford_pets
+#   --device         设备: cuda, cpu
+#   -b, --batch-size 批大小（默认16）
 
-# 汇总结果并生成图表
-python collect_results.py --latex --plot
+# 批量运行对比实验
+bash run_experiments.sh                    # 默认: 100,80,60,40 epochs
+bash run_experiments.sh cuda 16 "100,80,60,40"  # 自定义 epochs 列表
+
+# 收集结果
+python collect_results.py                   # 按 shot 对比
+python collect_results.py --epochs           # 按 epochs 对比（支持不同 epoch 设置的结果）
+python collect_results.py --latex --plot     # 生成 LaTeX 表格和图表
 ```
 
 ### 启动演示
