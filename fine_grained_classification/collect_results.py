@@ -38,21 +38,31 @@ def find_experiment_dirs(base_dir):
             shots = int(shots_dir.split("_")[1])
             full_path = os.path.join(trainer_dir, shots_dir)
             
+            # 尝试从日志中解析训练的 epoch 数量
+            epochs = None
+            log_file = os.path.join(full_path, "log.txt")
+            if os.path.exists(log_file):
+                epochs = extract_epochs_from_log(log_file)
+            
             # 查找 seed 子目录
             if os.path.isdir(full_path):
                 for seed_dir in os.listdir(full_path):
                     if seed_dir.startswith("seed_"):
                         seed_path = os.path.join(full_path, seed_dir)
                         if os.path.isdir(seed_path):
+                            # 尝试从子目录的日志获取 epoch
+                            seed_log = os.path.join(seed_path, "log.txt")
+                            if os.path.exists(seed_log):
+                                epochs = extract_epochs_from_log(seed_log) or epochs
                             experiments.append({
                                 "trainer": trainer_name,
                                 "shots": shots,
                                 "seed": seed_dir,
+                                "epochs": epochs,
                                 "path": seed_path,
                             })
             
             # 也检查直接在 shots 目录下的日志（兼容旧格式）
-            log_file = os.path.join(full_path, "log.txt")
             if os.path.exists(log_file):
                 # 检查是否已存在相同路径
                 if not any(e["path"] == full_path for e in experiments):
@@ -60,10 +70,25 @@ def find_experiment_dirs(base_dir):
                         "trainer": trainer_name,
                         "shots": shots,
                         "seed": "default",
+                        "epochs": epochs,
                         "path": full_path,
                     })
     
     return experiments
+
+
+def extract_epochs_from_log(log_file):
+    """从日志中解析训练的 epoch 总数"""
+    try:
+        with open(log_file, "r") as f:
+            content = f.read()
+            # 匹配 "epoch [50/50]" 或类似的格式
+            match = re.search(r"epoch\s*\[(\d+)/(\d+)\]", content, re.IGNORECASE)
+            if match:
+                return int(match.group(2))  # 返回总 epoch 数
+    except:
+        pass
+    return None
 
 
 def find_latest_log(dir_path):
@@ -171,16 +196,19 @@ def collect_results(base_dir):
 
         trainer = exp["trainer"]
         shots = exp["shots"]
+        epochs = exp.get("epochs")
 
         if trainer not in results:
             results[trainer] = {}
         results[trainer][shots] = {
             "accuracy": acc,
             "path": exp["path"],
+            "epochs": epochs,
         }
 
         status = f"{acc:.1f}%" if acc is not None else "N/A"
-        print(f"  {trainer:25s} | {shots:2d}-shot | {status}")
+        epochs_str = f"(ep{epochs})" if epochs else ""
+        print(f"  {trainer:25s} | {shots:2d}-shot {epochs_str:>8s} | {status}")
 
     return results
 
@@ -205,6 +233,90 @@ def filter_and_group_results(results):
                 filtered[trainer][shots] = data
     
     return filtered
+
+
+def collect_results_by_epochs(base_dir):
+    """收集所有实验结果，按 epoch 分组"""
+    experiments = find_experiment_dirs(base_dir)
+
+    if not experiments:
+        return {}
+
+    # 按 trainer -> epochs -> shots 组织
+    results = {}
+    for exp in experiments:
+        acc = extract_accuracy_from_log(exp["path"])
+
+        trainer = exp["trainer"]
+        shots = exp["shots"]
+        epochs = exp.get("epochs")  # 可能为 None
+
+        if trainer not in results:
+            results[trainer] = {}
+        
+        # 用 epochs 作为 key
+        epochs_key = epochs if epochs else "unknown"
+        
+        if epochs_key not in results[trainer]:
+            results[trainer][epochs_key] = {}
+        
+        results[trainer][epochs_key][shots] = {
+            "accuracy": acc,
+            "path": exp["path"],
+        }
+
+        status = f"{acc:.1f}%" if acc is not None else "N/A"
+        epochs_str = f"(ep{epochs})" if epochs else ""
+        print(f"  {trainer:25s} | {shots:2d}-shot {epochs_str:>8s} | {status}")
+
+    return results
+
+
+def print_epoch_comparison_table(results):
+    """打印按 epoch 分组的对比表格"""
+    print("\n" + "=" * 80)
+    print("  Comparison Table by Epochs: Top-1 Accuracy (%)")
+    print("=" * 80)
+
+    # 获取所有 trainer 和 epochs
+    all_epochs = set()
+    for trainer, epochs_data in results.items():
+        all_epochs.update(epochs_data.keys())
+    
+    valid_epochs = sorted([e for e in all_epochs if e != "unknown"], key=lambda x: (x is None, x))
+    
+    for epochs in valid_epochs:
+        print(f"\n--- Epochs: {epochs} ---")
+        
+        # 过滤这个 epoch 的数据
+        filtered = {}
+        for trainer, epochs_data in results.items():
+            if epochs in epochs_data:
+                filtered[trainer] = epochs_data[epochs]
+        
+        if not filtered:
+            continue
+            
+        shots_list = sorted(set(s for t in filtered.values() for s in t.keys()))
+        
+        header = f"{'Method':<25s}"
+        for s in shots_list:
+            header += f" | {s:>2d}-shot"
+        print(header)
+        print("-" * 60)
+
+        for trainer in sorted(filtered.keys()):
+            display_name = "Ours" if trainer == "DynamicPromptTrainer" else trainer
+            row = f"{display_name:<25s}"
+            for s in shots_list:
+                acc = filtered[trainer].get(s, {}).get("accuracy")
+                if acc is not None:
+                    row += f" | {acc:>6.1f}%"
+                else:
+                    row += f" |    N/A"
+            print(row)
+
+    print("=" * 80)
 
 
 def print_comparison_table(results):
@@ -430,38 +542,48 @@ def main():
         action="store_true",
         help="Generate comparison plots",
     )
+    parser.add_argument(
+        "--epochs", "-e",
+        action="store_true",
+        help="Compare results by different epoch numbers",
+    )
     args = parser.parse_args()
 
     print("Collecting experiment results...")
     print(f"Base directory: {args.base_dir}")
     print()
 
-    results = collect_results(args.base_dir)
-
-    if results:
-        print_comparison_table(results)
-
-        if args.latex:
-            print_latex_table(results)
-
-        if args.plot:
-            plot_learning_curves(args.base_dir, results)
-
-        # 保存结果到 JSON
-        json_path = os.path.join(args.base_dir, "experiment_summary.json")
-        filtered_results = filter_and_group_results(results)
-        summary = {}
-        for trainer, shots_data in filtered_results.items():
-            summary[trainer] = {}
-            for shots, data in shots_data.items():
-                summary[trainer][str(int(shots))] = data.get("accuracy")
-
-        with open(json_path, "w") as f:
-            json.dump(summary, f, indent=2)
-        print(f"\nResults saved to: {json_path}")
+    if args.epochs:
+        # 按 epoch 对比
+        results = collect_results_by_epochs(args.base_dir)
+        if results:
+            print_epoch_comparison_table(results)
     else:
-        print("\nNo results found. Please run experiments first:")
-        print("  bash run_experiments.sh cuda")
+        results = collect_results(args.base_dir)
+        if results:
+            print_comparison_table(results)
+
+            if args.latex:
+                print_latex_table(results)
+
+            if args.plot:
+                plot_learning_curves(args.base_dir, results)
+
+            # 保存结果到 JSON
+            json_path = os.path.join(args.base_dir, "experiment_summary.json")
+            filtered_results = filter_and_group_results(results)
+            summary = {}
+            for trainer, shots_data in filtered_results.items():
+                summary[trainer] = {}
+                for shots, data in shots_data.items():
+                    summary[trainer][str(int(shots))] = data.get("accuracy")
+
+            with open(json_path, "w") as f:
+                json.dump(summary, f, indent=2)
+            print(f"\nResults saved to: {json_path}")
+        else:
+            print("\nNo results found. Please run experiments first:")
+            print("  bash run_experiments.sh cuda")
 
 
 if __name__ == "__main__":

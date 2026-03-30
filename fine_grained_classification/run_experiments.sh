@@ -40,12 +40,12 @@ for TRAINER in "${TRAINERS[@]}"; do
         CURRENT=$((CURRENT + 1))
         
         # 根据 shot 数量动态设置 epochs（防止过拟合）
-        # shot 越少，需要越多 epochs 才能拟合
+        # shot 越少，需要越多 epochs
         case $SHOTS in
-            1)  EPOCHS=200 ;;
-            4)  EPOCHS=100 ;;
-            16) EPOCHS=50 ;;
-            32) EPOCHS=30 ;;
+            1)  EPOCHS=100 ;;
+            4)  EPOCHS=80 ;;
+            16) EPOCHS=60 ;;
+            32) EPOCHS=40 ;;
             *)  EPOCHS=50 ;;
         esac
         
