@@ -7,26 +7,35 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 设备选择（可通过命令行参数覆盖）
+# 用法: bash run_experiments.sh [device] [batch_size] [epochs_list]
+# 示例: bash run_experiments.sh cuda 16 "100,80,60,40"
+#   - device: cuda 或 cpu (默认: cuda)
+#   - batch_size: 批大小 (默认: 16)
+#   - epochs_list: 1,4,16,32-shot 对应的 epoch 数，用逗号分隔 (默认: 100,80,60,40)
+
+# 设备选择
 DEVICE="${1:-cuda}"
-EPOCHS="${2:-50}"
-BATCH_SIZE="${3:-16}"
+BATCH_SIZE="${2:-16}"
+EPOCHS_LIST="${3:-100,80,60,40}"
 DATASET="oxford_pets"
 SEED=1
+
+# 解析 epochs 列表
+IFS=',' read -ra EPOCHS_ARR <<< "$EPOCHS_LIST"
+SHOTS_LIST=(1 4 16 32)
 
 echo "=============================================="
 echo "  Fine-Grained Classification Experiments"
 echo "=============================================="
-echo "  Device:     $DEVICE"
-echo "  Epochs:     $EPOCHS"
-echo "  Batch size: $BATCH_SIZE"
-echo "  Dataset:    $DATASET"
-echo "  Seed:       $SEED"
+echo "  Device:       $DEVICE"
+echo "  Batch size:   $BATCH_SIZE"
+echo "  Epochs list:  $EPOCHS_LIST (1,4,16,32-shot)"
+echo "  Dataset:      $DATASET"
+echo "  Seed:         $SEED"
 echo "=============================================="
 echo ""
 
 TRAINERS=("DynamicPromptTrainer" "CoOp" "CoCoOp")
-SHOTS_LIST=(1 4 16 32)
 
 TOTAL=$((${#TRAINERS[@]} * ${#SHOTS_LIST[@]}))
 CURRENT=0
@@ -36,18 +45,12 @@ echo "Experiment Results - $(date)" > "$RESULTS_LOG"
 echo "==========================================" >> "$RESULTS_LOG"
 
 for TRAINER in "${TRAINERS[@]}"; do
-    for SHOTS in "${SHOTS_LIST[@]}"; do
+    for i in "${!SHOTS_LIST[@]}"; do
+        SHOTS=${SHOTS_LIST[$i]}
         CURRENT=$((CURRENT + 1))
         
-        # 根据 shot 数量动态设置 epochs（防止过拟合）
-        # shot 越少，需要越多 epochs
-        case $SHOTS in
-            1)  EPOCHS=100 ;;
-            4)  EPOCHS=80 ;;
-            16) EPOCHS=60 ;;
-            32) EPOCHS=40 ;;
-            *)  EPOCHS=50 ;;
-        esac
+        # 从外部传入的 epochs 列表获取对应的 epoch
+        EPOCHS=${EPOCHS_ARR[$i]}
         
         echo ""
         echo "[$CURRENT/$TOTAL] Running: $TRAINER with $SHOTS-shot (epochs=$EPOCHS)"
