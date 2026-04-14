@@ -60,7 +60,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train fine-grained classifier with dynamic prompts")
     parser.add_argument("-root", "--root", type=str, default=os.path.dirname(os.path.abspath(__file__)),
                        help="path to project root")
-    parser.add_argument("-c", "--config", type=str, default="configs/dynamic_rn50.yaml",
+    parser.add_argument("-c", "--config", type=str, default="configs/dynamic_vitb16.yaml",
                        help="path to config file")
     parser.add_argument("-s", "--save-dir", type=str, default=None,
                        help="directory to save training outputs (auto-generated if not specified)")
@@ -89,6 +89,9 @@ def parse_args():
     parser.add_argument("--split", type=str, default="1",
                        choices=["0", "1", "2", "3"],
                        help="dataset split for few-shot")
+    parser.add_argument("--backbone", type=str, default="RN50",
+                       choices=["RN50", "RN101", "ViT-B/32", "ViT-B/16"],
+                       help="CLIP backbone model (default: RN50)")
     parser.add_argument("--device", type=str, default="cpu",
                        choices=["cuda", "cpu", "mps"],
                        help="device to use")
@@ -127,18 +130,18 @@ def extend_cfg(cfg):
     cfg.TRAINER.DYNAMIC = CN()
     cfg.TRAINER.DYNAMIC.CTX_INIT = "a photo of a"
     cfg.TRAINER.DYNAMIC.N_CTX = 16
-    cfg.TRAINER.DYNAMIC.PREC = "fp32"
+    cfg.TRAINER.DYNAMIC.PREC = "fp16"  # 使用fp16加速训练，与CoCoOp一致
     cfg.TRAINER.DYNAMIC.MODEL_TYPE = "dynamic"
     cfg.TRAINER.DYNAMIC.USE_DYNAMIC = True
     cfg.TRAINER.DYNAMIC.USE_ADAPTIVE = True
     cfg.TRAINER.DYNAMIC.USE_DIFFICULTY_WEIGHT = True
-    cfg.TRAINER.DYNAMIC.ALPHA = 0.1
-    cfg.TRAINER.DYNAMIC.BETA = 0.01
-    cfg.TRAINER.DYNAMIC.ADAPTIVE_HIDDEN_DIM = 64
+    cfg.TRAINER.DYNAMIC.ALPHA = 0.05  # 降低学习率系数
+    cfg.TRAINER.DYNAMIC.BETA = 0.005  # 降低正则化系数
+    cfg.TRAINER.DYNAMIC.ADAPTIVE_HIDDEN_DIM = None  # None表示使用 vis_dim // 16
     cfg.TRAINER.DYNAMIC.USE_SEMANTIC_ENHANCEMENT = False
     cfg.TRAINER.DYNAMIC.USE_ATTRIBUTE_DATABASE = True
     cfg.TRAINER.DYNAMIC.MONITOR_INTERVAL = 60
-    cfg.TRAINER.DYNAMIC.LR = 0.001  # 降低学习率（原0.002对动态提示词过高）
+    cfg.TRAINER.DYNAMIC.LR = 0.002  # 与CoCoOp保持一致
 
 
 def setup_cfg(args):
@@ -190,6 +193,8 @@ def setup_cfg(args):
         cfg.DATASET.NUM_SHOTS = args.shots
     if args.split:
         cfg.DATASET.SPLIT = args.split
+    if args.backbone:
+        cfg.MODEL.BACKBONE.NAME = args.backbone
     if args.eval_only:
         cfg.EVAL_ONLY = True
     if args.model_dir:

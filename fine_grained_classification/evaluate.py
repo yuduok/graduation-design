@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--output", type=str, default="eval_results",
                         help="output directory for results")
     parser.add_argument("--backbone", type=str, default="RN50",
-                        choices=["RN50", "RN101", "ViT-B/32"],
+                        choices=["RN50", "RN101", "ViT-B/16"],
                         help="CLIP backbone")
     parser.add_argument("--batch-size", type=int, default=16,
                         help="batch size")

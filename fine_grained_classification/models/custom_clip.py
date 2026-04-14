@@ -88,7 +88,7 @@ class CustomCLIPDynamic(nn.Module):
     
     def forward(self, image, label=None):
         """
-        前向传播
+        前向传播 - 两阶段预测机制
         Args:
             image: 输入图像 [batch_size, 3, H, W]
             label: 标签 (训练时可选)
@@ -99,18 +99,24 @@ class CustomCLIPDynamic(nn.Module):
         image_features = self.image_encoder(image.type(self.dtype))
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
-        # 2. 生成动态提示词（单阶段前向，稳定训练）
+        # 2. 生成动态提示词（两阶段前向）
         if self.training and label is not None:
-            # 训练模式：生成提示词并更新原型
-            prompts = self.prompt_learner(image_features, label, predictions=None)
+            # 训练模式：两阶段前向传播
             
-            # 更新类别原型（不计算权重，保持训练稳定）
+            # 第一阶段：使用基础提示词获取预测（不计算梯度）
+            with torch.no_grad():
+                base_prompts = self.prompt_learner(image_features)  # 基础提示词，不带 predictions
+                base_logits = self._encode_and_compute_logits(image_features, base_prompts)
+            
+            # 更新类别原型
             if (self.prompt_learner.dynamic_optimizer is not None
                 and self.prompt_learner.dynamic_optimizer.difficulty_calculator is not None):
                 self.prompt_learner.dynamic_optimizer.difficulty_calculator.update_prototypes(
                     image_features, label
                 )
             
+            # 第二阶段：使用预测计算难度权重，生成自适应提示词
+            prompts = self.prompt_learner(image_features, label, predictions=base_logits)
             logits = self._encode_and_compute_logits(image_features, prompts)
         else:
             # 推理模式

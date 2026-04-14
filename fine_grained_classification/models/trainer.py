@@ -119,10 +119,9 @@ class DynamicPromptTrainer(TrainerX):
                 if output.dim() == 0:  # scalar loss
                     loss = output
                 else:  # logits
-                    # 获取难度权重（如果有）
+                    # 获取难度权重（如果有）- 可学习参数，不 detach
                     weights = model.get_difficulty_weights()
                     if weights is not None:
-                        weights = weights.detach()  # 权重不参与梯度计算
                         loss = F.cross_entropy(output, label, weight=None, reduction='none')
                         # 加权损失
                         weighted_loss = (loss * weights).mean()
@@ -142,10 +141,9 @@ class DynamicPromptTrainer(TrainerX):
             if output.dim() == 0:  # scalar loss
                 loss = output
             else:  # logits
-                # 获取难度权重（如果有）
+                # 获取难度权重（如果有）- 可学习参数，不 detach
                 weights = model.get_difficulty_weights()
                 if weights is not None:
-                    weights = weights.detach()  # 权重不参与梯度计算
                     loss = F.cross_entropy(output, label, reduction='none')
                     # 加权损失
                     weighted_loss = (loss * weights).mean()

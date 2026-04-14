@@ -1,5 +1,5 @@
 # 动态提示词训练配置文件
-# 基于CoOp默认配置，优化后版本
+# ViT-B/16 backbone 版本
 
 DATALOADER:
   TRAIN_X:
@@ -29,7 +29,7 @@ TRAIN:
 
 MODEL:
   BACKBONE:
-    NAME: "RN50"
+    NAME: "ViT-B/16"
   INIT_WEIGHTS: ""
 
 # 动态提示词特定配置
@@ -37,12 +37,12 @@ TRAINER:
   DYNAMIC:
     CTX_INIT: "a photo of a"
     N_CTX: 16
-    PREC: "fp16"              # 使用fp16加速训练
+    PREC: "fp16"
     MODEL_TYPE: "dynamic"
     USE_DYNAMIC: True
     USE_ADAPTIVE: True
     USE_DIFFICULTY_WEIGHT: True
-    LR: 0.002                 # 与CoCoOp一致
+    LR: 0.002
 
 OUTPUT_DIR: "output_fgd/oxford_pets"
 SEED: 1

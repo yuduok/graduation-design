@@ -9,78 +9,76 @@ from collections import OrderedDict
 import math
 
 
-class DifficultyWeightCalculator:
+class DifficultyWeightCalculator(nn.Module):
     """
-    难度权重计算模块
-    - 特征空间中远离中心的样本权重更高
-    - 被频繁误分类的样本权重更高
+    可学习难度权重计算模块
+    - 基于预测置信度计算权重
+    - 使用可学习温度参数，让模型自己学习何时关注困难样本
     """
     def __init__(self, momentum=0.9):
+        super().__init__()
         self.momentum = momentum
-        self.breed_prototypes = {}
-        self.misclassification_history = {}
+        self.class_prototypes = {}
+        
+        # 可学习参数 - 使用更温和的初始值
+        self.temperature = nn.Parameter(torch.tensor(0.5))  # 温度参数（更大=更温和的权重调整）
+        self.confidence_scale = nn.Parameter(torch.tensor(1.0))  # 置信度缩放（更温和）
+        self.wrong_weight = nn.Parameter(torch.tensor(1.5))  # 错误预测权重（减少过度惩罚）
+        self.low_conf_weight = nn.Parameter(torch.tensor(1.2))  # 低置信度权重（更温和）
         
     def update_prototypes(self, features, labels):
         """更新每个类别的原型（特征中心）"""
-        prototypes = {}
-        for feat, label in zip(features, labels):
-            label_idx = label.item()
-            if label_idx not in prototypes:
-                prototypes[label_idx] = []
-            prototypes[label_idx].append(feat)
-        
-        for label_idx, feats in prototypes.items():
-            center = torch.mean(torch.stack(feats), dim=0)
-            if label_idx in self.breed_prototypes:
+        for label_idx in torch.unique(labels):
+            mask = labels == label_idx
+            class_feats = features[mask]
+            center = torch.mean(class_feats, dim=0)
+            
+            label_key = label_idx.item()
+            if label_key in self.class_prototypes:
                 # 动量更新
-                self.breed_prototypes[label_idx] = (
-                    self.momentum * self.breed_prototypes[label_idx] + 
+                self.class_prototypes[label_key] = (
+                    self.momentum * self.class_prototypes[label_key] +
                     (1 - self.momentum) * center
                 )
             else:
-                self.breed_prototypes[label_idx] = center.detach()
+                self.class_prototypes[label_key] = center.detach()
     
-    def compute_weights(self, features, labels, predictions=None):
+    def forward(self, features, labels, predictions=None):
         """
         计算样本难度权重
         Args:
             features: 图像特征 [batch_size, feature_dim]
             labels: 真实标签 [batch_size]
-            predictions: 预测结果 [batch_size, num_classes] (可选)
+            predictions: 预测结果 [batch_size, num_classes]
         Returns:
             weights: 每个样本的权重 [batch_size]
         """
-        weights = []
-
-        for i, (feat, label) in enumerate(zip(features, labels)):
-            label_idx = label.item()
-
-            # 基础权重为1
-            weight = 1.0
-
-            # 1. 特征距离权重：特征空间中距离类别中心越远，权重越高
-            if label_idx in self.breed_prototypes:
-                distance = torch.norm(feat - self.breed_prototypes[label_idx])
-                weight += 0.5 * torch.sigmoid(distance - 1.0)
-
-            # 2. 误分类权重（如果有 predictions）
-            if predictions is not None:
-                pred_idx = predictions[i].argmax().item()
-                if label_idx != pred_idx:
-                    weight *= 1.5
-
-                    # 记录误分类历史
-                    if label_idx not in self.misclassification_history:
-                        self.misclassification_history[label_idx] = {}
-                    if pred_idx not in self.misclassification_history[label_idx]:
-                        self.misclassification_history[label_idx][pred_idx] = 0
-                    self.misclassification_history[label_idx][pred_idx] += 1
-
-            # 限制权重范围
-            weight = max(0.5, min(2.0, weight))
-            weights.append(weight)
-
-        return torch.tensor(weights, device=features.device)
+        batch_size = features.shape[0]
+        
+        if predictions is None:
+            return torch.ones(batch_size, device=features.device)
+        
+        # 获取预测概率
+        probs = F.softmax(predictions, dim=1)
+        target_probs = probs.gather(1, labels.unsqueeze(1)).squeeze(1)  # [batch_size]
+        
+        # 使用可学习的温度和缩放计算权重
+        # 基础权重 = 1 + sigmoid(scale * (1 - confidence) / temperature)
+        uncertainty = 1.0 - target_probs
+        weight_factor = torch.sigmoid(
+            self.confidence_scale * uncertainty / (self.temperature + 1e-8)
+        )
+        weights = 1.0 + weight_factor  # 范围 [1, 2]
+        
+        # 对错误预测的样本进一步加权
+        pred_labels = predictions.argmax(dim=1)
+        wrong_mask = (pred_labels != labels).float()
+        weights = weights + wrong_mask * (self.wrong_weight - 1.0)  # 错误样本额外加权
+        
+        # 确保权重在合理范围内
+        weights = torch.clamp(weights, min=1.0, max=3.0)
+        
+        return weights
 
 
 class DynamicPromptOptimizer(nn.Module):
@@ -91,7 +89,7 @@ class DynamicPromptOptimizer(nn.Module):
     - 自适应学习率调整
     """
     def __init__(self, n_ctx=16, ctx_dim=512, alpha=0.1, beta=0.01, 
-                 use_difficulty_weight=True, momentum=0.9):
+                 use_difficulty_weight=True, momentum=0.9, dtype=None):
         super().__init__()
         self.n_ctx = n_ctx
         self.ctx_dim = ctx_dim
@@ -99,8 +97,9 @@ class DynamicPromptOptimizer(nn.Module):
         self.beta = beta    # 正则化系数
         self.use_difficulty_weight = use_difficulty_weight
         
-        # 可学习的上下文 tokens
-        self.ctx = nn.Parameter(torch.randn(n_ctx, ctx_dim) * 0.02)
+        # 可学习的上下文 tokens - 使用正确的 dtype
+        ctx_tensor = torch.randn(n_ctx, ctx_dim, dtype=dtype if dtype else torch.float32) * 0.02
+        self.ctx = nn.Parameter(ctx_tensor)
         
         # 难度权重计算器
         if use_difficulty_weight:
@@ -109,7 +108,8 @@ class DynamicPromptOptimizer(nn.Module):
             self.difficulty_calculator = None
         
         # 类别特定的自适应因子
-        self.class_adaptive_factors = nn.Parameter(torch.ones(1, n_ctx, ctx_dim))
+        class_af = torch.ones(1, n_ctx, ctx_dim, dtype=dtype if dtype else torch.float32)
+        self.class_adaptive_factors = nn.Parameter(class_af)
         
     def forward(self, features, labels=None, predictions=None):
         """
@@ -126,8 +126,8 @@ class DynamicPromptOptimizer(nn.Module):
             if self.use_difficulty_weight and self.difficulty_calculator:
                 # 更新原型
                 self.difficulty_calculator.update_prototypes(features, labels)
-                # 计算权重（如果有 predictions 用 predictions，否则仅用原型距离）
-                weights = self.difficulty_calculator.compute_weights(
+                # 计算权重（使用可学习的难度权重计算器）
+                weights = self.difficulty_calculator(
                     features, labels, predictions
                 )
                 return self.ctx, weights
@@ -155,11 +155,16 @@ class SoftPromptAdapter(nn.Module):
     软提示词适配器
     - 使用轻量级MLP动态生成提示词偏移
     - 根据输入图像特征自适应调整
+    - 参考 CoCoOp 设计：隐藏层维度为 vis_dim // 16
     """
-    def __init__(self, vis_dim=512, ctx_dim=512, hidden_dim=64):
+    def __init__(self, vis_dim=512, ctx_dim=512, hidden_dim=None, dtype=None):
         super().__init__()
         self.vis_dim = vis_dim
         self.ctx_dim = ctx_dim
+        
+        # 参考 CoCoOp：使用 vis_dim // 16 作为隐藏层维度
+        if hidden_dim is None:
+            hidden_dim = vis_dim // 16
         
         # 轻量级元网络
         self.meta_net = nn.Sequential(OrderedDict([
@@ -168,11 +173,9 @@ class SoftPromptAdapter(nn.Module):
             ("linear2", nn.Linear(hidden_dim, ctx_dim))
         ]))
         
-        # 初始化
-        nn.init.kaiming_normal_(self.meta_net[0].weight)
-        nn.init.zeros_(self.meta_net[0].bias)
-        nn.init.kaiming_normal_(self.meta_net[2].weight)
-        nn.init.zeros_(self.meta_net[2].bias)
+        # 如果指定了 dtype，则转换
+        if dtype is not None:
+            self.meta_net = self.meta_net.type(dtype)
     
     def forward(self, image_features, base_ctx, n_cls):
         """
@@ -256,17 +259,19 @@ class AdaptivePromptLearner(nn.Module):
                 ctx_dim=ctx_dim,
                 alpha=getattr(cfg.TRAINER.DYNAMIC, 'ALPHA', 0.1),
                 beta=getattr(cfg.TRAINER.DYNAMIC, 'BETA', 0.01),
-                use_difficulty_weight=getattr(cfg.TRAINER.DYNAMIC, 'USE_DIFFICULTY_WEIGHT', True)
+                use_difficulty_weight=getattr(cfg.TRAINER.DYNAMIC, 'USE_DIFFICULTY_WEIGHT', True),
+                dtype=self.dtype
             )
         else:
             self.dynamic_optimizer = None
         
         if use_adaptive:
-            hidden_dim = getattr(cfg.TRAINER.DYNAMIC, 'ADAPTIVE_HIDDEN_DIM', 64)
+            hidden_dim = getattr(cfg.TRAINER.DYNAMIC, 'ADAPTIVE_HIDDEN_DIM', None)
             self.soft_prompt_adapter = SoftPromptAdapter(
                 vis_dim=vis_dim,
                 ctx_dim=ctx_dim,
-                hidden_dim=hidden_dim
+                hidden_dim=hidden_dim,
+                dtype=self.dtype
             )
         else:
             self.soft_prompt_adapter = None

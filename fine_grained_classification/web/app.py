@@ -40,7 +40,7 @@ class PetClassifierAPI:
         self.load_model(model_path)
     
     def load_model(self, model_path=None):
-        """加载模型"""
+        """加载CLIP模型"""
         print("Loading CLIP model...")
         self.clip_model, _ = clip.load("RN50", device=self.device)
         self.clip_model.eval()

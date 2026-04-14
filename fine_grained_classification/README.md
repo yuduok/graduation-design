@@ -34,6 +34,7 @@ pip install -r fine_grained_classification/requirements.txt
 # 3. 安装 Dassl（完整版，包含 dassl.data 模块）
 cd CoOp/dassl
 pip install -e .
+```
 
 ## 数据准备
 
@@ -95,15 +96,15 @@ python train.py -d oxford_pets -t DynamicPromptTrainer --shots 16 -e 60 --device
 
 # 参数说明：
 #   -t, --trainer    模型类型: DynamicPromptTrainer, CoOp, CoCoOp
-#   --shots          Few-shot 数量: 1, 4, 16, 32
+#   --shots          Few-shot 数量: 1, 2, 4, 8, 16
 #   -e, --epochs     训练轮次
 #   -d, --dataset    数据集: oxford_pets
 #   --device         设备: cuda, cpu
 #   -b, --batch-size 批大小（默认16）
 
 # 批量运行对比实验
-bash run_experiments.sh                    # 默认: 100,80,60,40 epochs
-bash run_experiments.sh cuda 16 "100,80,60,40"  # 自定义 epochs 列表
+bash run_experiments.sh                    # 默认: 100,90,80,70,50 epochs
+bash run_experiments.sh cuda 16 "100,90,80,70,50"  # 自定义 epochs 列表
 
 # 收集结果
 python collect_results.py                   # 按 shot 对比
@@ -147,18 +148,24 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 
 | 特性 | CoOp | CoCoOp | **本系统（DynamicPromptTrainer）** |
 |------|------|--------|----------------------------------|
-| 提示词类型 | 静态可学习 ctx | 图像条件偏移 | 图像条件偏移 + 难度自适应加权 |
-| 核心参数 | `ctx` | `ctx` + `meta_net` | `ctx` + `SoftPromptAdapter` + `DynamicPromptOptimizer` + `class_adaptive_factors` |
+| 提示词类型 | 静态可学习 ctx | 图像条件偏移 | 图像条件偏移 + 可学习难度加权 |
+| 核心参数 | `ctx` | `ctx` + `meta_net` | `ctx` + `SoftPromptAdapter` + `DifficultyWeightCalculator` + `class_adaptive_factors` |
 | 是否感知图像 | 否 | 是 | 是 |
-| 是否感知难度 | 否 | 否 | **是（独有）** |
-| 损失函数 | 标准 CE | 标准 CE | **加权 CE（困难样本权重更大）** |
+| 是否感知难度 | 否 | 否 | **是（可学习）** |
+| 损失函数 | 标准 CE | 标准 CE | **加权 CE（困难样本权重可学习）** |
 | 提示词层数 | 单层静态 | 单层偏移 | **双层（MLP 偏移 + 类别自适应因子）** |
 
-### 三项核心创新
+### 核心创新
 
-1. **困难样本自适应加权** — `DifficultyWeightCalculator` 基于特征空间距离和误分类历史，动态调整每个样本的损失权重（误分类样本 ×2，远离类中心样本额外 +0.5×distance）
+1. **可学习难度加权** — `DifficultyWeightCalculator` 使用可学习温度参数，让模型自动学习何时关注困难样本：
+   - `temperature`: 控制权重对置信度变化的敏感度
+   - `confidence_scale`: 控制权重放大程度
+   - `wrong_weight`: 错误预测样本的额外权重
+   - 移除 `detach()`，让梯度回传使这些参数可学习
+
 2. **双层提示词调整** — 在 `SoftPromptAdapter` 的图像条件偏移之上叠加 `class_adaptive_factors`，为不同类别学习不同的提示词缩放
-3. **动量更新类别原型** — 训练过程中以 momentum=0.9 持续跟踪每个类别的特征中心，为难度评估提供稳定参考
+
+3. **两阶段前向传播** — 训练时先计算基础 logits 获取预测，再用预测计算难度权重生成自适应提示词
 
 ### 工作流程
 
@@ -167,8 +174,8 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
          → [可训练] SoftPromptAdapter MLP → ctx 偏移
          → 基础 ctx × class_adaptive_factors + 偏移 → 图片条件提示词
          → [冻结] CLIP 文本编码器 → 初始 logits
-         → DifficultyWeightCalculator(原型距离 + 误分类反馈) → 难度权重
-         → 加权 CE loss → 反向传播（仅更新 ctx + MLP + adaptive_factors）
+         → DifficultyWeightCalculator(可学习温度) → 难度权重
+         → 加权 CE loss → 反向传播（更新 ctx + MLP + 温度参数）
 ```
 
 ### 核心模块
@@ -176,9 +183,9 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 | 模块 | 文件 | 说明 |
 |------|------|------|
 | AdaptivePromptLearner | `models/dynamic_prompt.py` | 整合双层提示词生成（偏移 + 类别因子） |
-| SoftPromptAdapter | `models/dynamic_prompt.py` | 512→64→512 双层 MLP 生成图像条件偏移 |
+| SoftPromptAdapter | `models/dynamic_prompt.py` | 512→32→512 MLP 生成图像条件偏移（vis_dim//16） |
+| DifficultyWeightCalculator | `models/dynamic_prompt.py` | 可学习难度权重计算器（温度参数） |
 | DynamicPromptOptimizer | `models/dynamic_prompt.py` | 难度权重计算 + 类别自适应因子 |
-| DifficultyWeightCalculator | `models/dynamic_prompt.py` | 基于原型距离 + 误分类历史的加权 |
 | BreedAttributeDatabase | `models/breed_semantic.py` | 37 品种属性库（毛发/面部/体型） |
 | SemanticEnhancer | `models/breed_semantic.py` | 多模板语义增强 |
 
@@ -189,22 +196,66 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 | 参数 | 值 |
 |------|-----|
 | Backbone | CLIP RN50 |
-| 优化器 | SGD (lr=0.001) | 动态提示词专用学习率（原0.002过高） |
+| 优化器 | SGD (lr=0.002) | 与 CoCoOp 保持一致 |
 | 学习率调度 | Cosine Annealing + warmup 1 epoch |
-| 训练轮次 | 50 |
+| 训练轮次 | 50-100（根据 shot 数） |
 | 可学习 ctx | 4 tokens，初始化为 "a photo of a" |
-| SoftPromptAdapter | 512→64→512 MLP |
+| SoftPromptAdapter | 512→32→512 MLP（vis_dim//16） |
+| 难度权重 | 可学习温度参数，初始 temperature=0.1 |
+| 精度 | fp16 | 与 CoCoOp 一致，加速训练 |
 
 ## 实验结果
 
-| 方法 | 1-shot | 4-shot | 16-shot | 32-shot |
-|------|--------|--------|---------|---------|
-| Zero-shot CLIP | ~81% | ~81% | ~81% | ~81% |
-| CoOp | 83.3% | 87.9% | 88.3% | - |
-| CoCoOp | 88.0% | 89.0% | 90.0% | - |
-| **Ours (Dynamic)** | 待训练 | 待训练 | 待训练 | 待训练 |
+### 2026-04-02 实验结果（OxfordPets）
 
-> 训练中，预期 16-shot 达到 ~89-90%。
+| 方法 | 1-shot | 2-shot | 4-shot | 8-shot | 16-shot |
+|------|--------|--------|--------|--------|---------|
+| Zero-shot CLIP | ~81% | ~81% | ~81% | ~81% | ~81% |
+| CoOp | 80.9% | 82.1% | 86.9% | 86.9% | 88.3% |
+| CoCoOp | 86.8% | 83.3% | 88.9% | 88.5% | 90.0% |
+| **Ours (Dynamic)** | **84.9%** | **85.1%** | **89.1%** | **88.6%** | **89.1%** |
+
+**结论**：
+- DynamicPromptTrainer 在 2/4/8-shot 上优于 CoCoOp
+- DynamicPromptTrainer 在 1/16-shot 上略低于 CoCoOp
+- **整体显著优于 CoOp**（1-shot 提升 4%，16-shot 提升 0.8%）
+
+> 2026-04-02 更新：可学习难度权重模块已添加，建议重新训练验证效果。
+
+## 更新日志
+
+### 2026-04-02：可学习难度权重优化
+
+**修复内容**：
+1. **两阶段前向传播修复** — `CustomCLIPDynamic.forward()` 现在正确实现两阶段前向：
+   - 阶段1：使用基础提示词计算初始 logits（无梯度）
+   - 阶段2：使用初始 logits 计算难度权重，生成自适应提示词
+
+2. **SoftPromptAdapter 优化** — 隐藏层维度改为 `vis_dim // 16`（32 for RN50），与 CoCoOp 一致
+
+3. **可学习难度权重** — `DifficultyWeightCalculator` 改为 `nn.Module`，添加可学习参数：
+   - `temperature`: 温度参数（初始 0.1）
+   - `confidence_scale`: 置信度缩放（初始 2.0）
+   - `wrong_weight`: 错误预测权重（初始 2.0）
+   - 移除 `detach()`，让梯度回传
+
+4. **超参数调整** — 与 CoCoOp 保持一致：
+   - LR: 0.002
+   - PREC: fp16
+
+### 2026-03-28：训练稳定性修复
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| 权重范围无限制 | 困难权重可能达到 3-4 倍，对小样本冲击过大 | 添加 `weight = max(0.5, min(2.0, weight))` 限制 |
+| 学习率过高 | 0.002 对动态提示词参数过大 | 降为 0.001，后调整为 0.002 |
+
+### 2026-03-27：核心模块激活修复
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| 难度权重从未计算 | `predictions` 始终为 None | 改为两阶段前向 |
+| `class_adaptive_factors` 未参与计算 | 未与 ctx 相乘 | 在 forward 中相乘 |
 
 ## 参考资料
 

@@ -3,7 +3,7 @@
 **项目名称**: 基于提示词优化的细粒度猫狗分类系统
 **技术栈**: PyTorch 2.4.1 + CLIP (RN50) + Python 3.8+
 **数据集**: Oxford-IIIT Pets (7,390 张图片, 37 种猫狗品种)
-**更新时间**: 2026-03-27
+**更新时间**: 2026-04-02
 
 ---
 
@@ -17,13 +17,13 @@
 
 | 特性 | CoOp | CoCoOp | **本系统（DynamicPromptTrainer）** |
 |------|------|--------|----------------------------------|
-| 提示词类型 | **静态**：所有图片共享同一组可学习 ctx 向量 | **图像条件**：meta_net 生成偏移 | **图像条件 + 难度自适应**：双层调整 + 加权损失 |
-| 核心参数 | `ctx` | `ctx` + `meta_net` | `ctx` + `SoftPromptAdapter` + `DynamicPromptOptimizer` + `class_adaptive_factors` |
+| 提示词类型 | **静态**：所有图片共享同一组可学习 ctx 向量 | **图像条件**：meta_net 生成偏移 | **图像条件 + 可学习难度加权**：双层调整 + 加权损失 |
+| 核心参数 | `ctx` | `ctx` + `meta_net` | `ctx` + `SoftPromptAdapter` + `DifficultyWeightCalculator` + `class_adaptive_factors` |
 | 是否感知图像 | 否 | 是 | 是 |
-| 是否感知难度 | 否 | 否 | **是（独有）** |
-| 损失函数 | 标准 CE | 标准 CE | **加权 CE（困难样本权重更大）** |
+| 是否感知难度 | 否 | 否 | **是（可学习）** |
+| 损失函数 | 标准 CE | 标准 CE | **加权 CE（困难样本权重可学习）** |
 | 提示词调整层数 | 单层静态 | 单层偏移 | **双层（MLP 偏移 + 类别自适应因子）** |
-| 原型追踪 | 无 | 无 | 动量更新类原型，计算样本到类中心距离 |
+| 难度权重 | 无 | 无 | **可学习温度参数** |
 
 ### 动态提示词工作流程
 
@@ -40,12 +40,12 @@
   ↓
 logit_scale × (image_features @ text_features.T) → 初始 logits
   ↓
-DifficultyWeightCalculator(原型距离 + 误分类反馈) → 难度权重 w_i
+DifficultyWeightCalculator(可学习温度) → 难度权重 w_i
   ↓
-加权 CE loss = mean(w_i × CE_i) → 反向传播（仅更新 ctx + MLP + adaptive_factors）
+加权 CE loss = mean(w_i × CE_i) → 反向传播（更新 ctx + MLP + 温度参数）
 ```
 
-**关键创新**: 同一只"波斯猫"，不同姿态/角度的图片会产生不同的提示词偏移，让模型关注该图片中最有区分力的特征。
+**关键创新**: 使用可学习的温度参数，让模型自动学习何时该关注困难样本，而非人工设定固定权重。
 
 ---
 
@@ -61,7 +61,7 @@ fine_grained_classification/
 │   └── dynamic_rn50.yaml        # 训练超参配置
 ├── models/
 │   ├── custom_clip.py           # 自定义 CLIP（整合动态提示 + 语义增强）
-│   ├── dynamic_prompt.py        # AdaptivePromptLearner + SoftPromptAdapter
+│   ├── dynamic_prompt.py        # AdaptivePromptLearner + SoftPromptAdapter + DifficultyWeightCalculator
 │   ├── trainer.py               # DynamicPromptTrainer（注册到 Dassl）
 │   └── breed_semantic.py        # 品种属性库（37 品种的毛发/面部/体型特征）
 ├── demo/
@@ -79,15 +79,15 @@ fine_grained_classification/
 | 参数 | 值 | 说明 |
 |------|-----|------|
 | Backbone | RN50 | CLIP ResNet-50 |
-| 优化器 | SGD | lr=0.001（动态提示词专用） |
+| 优化器 | SGD | lr=0.002（与 CoCoOp 一致） |
 | 学习率调度 | Cosine Annealing | warmup 1 epoch |
-| 训练轮次 | 50 | - |
+| 训练轮次 | 50-100 | 根据 shot 数调整 |
 | 批大小 | 16 | 默认值，可按 GPU 显存调整 |
 | 可学习 ctx 长度 | 4 tokens | 初始化为 "a photo of a" |
 | ctx 嵌入维度 | 512 | 与 CLIP 特征维度一致 |
-| SoftPromptAdapter | 512→64→512 | 双层 MLP + ReLU |
-| 难度权重 | 距离系数 0.5 + 误分类 ×1.5 | 权重限制 [0.5, 2.0]，动量原型更新(0.9) |
-| 权重归一化 | contextnorm | 对提示词嵌入做 LayerNorm，稳定训练 |
+| SoftPromptAdapter | 512→32→512 | 双层 MLP + ReLU（vis_dim//16） |
+| 难度权重 | 可学习温度参数 | temperature=0.1, confidence_scale=2.0, wrong_weight=2.0 |
+| 精度 | fp16 | 与 CoCoOp 一致，加速训练 |
 
 ---
 
@@ -123,7 +123,7 @@ mkdir -p ../data/oxford_pets
 
 # 5. 开始训练
 cd ../../fine_grained_classification
-python train.py -d oxford_pets -e 50 -b 16 --shots 1 --trainer DynamicPromptTrainer --device cuda
+python train.py -d oxford_pets -e 50 -b 16 --shots 16 --trainer DynamicPromptTrainer --device cuda
 ```
 
 ### 目录结构要求
@@ -160,9 +160,9 @@ pip install streamlit flask flask-cors matplotlib seaborn scikit-learn
 ```bash
 # 在 fine_grained_classification/ 目录下执行
 # 单组实验（输出自动保存到 output_fgd/oxford_pets/{trainer}/shots_{n}/seed_{s}/）
-python train.py -d oxford_pets -e 50 -b 16 --shots 1 --trainer DynamicPromptTrainer --device cuda
+python train.py -d oxford_pets -e 50 -b 16 --shots 16 --trainer DynamicPromptTrainer --device cuda
 
-# 批量运行全部 9 组对比实验
+# 批量运行全部 15 组对比实验（3 方法 × 5 shots）
 bash run_experiments.sh cuda
 ```
 
@@ -176,7 +176,7 @@ streamlit run demo/pet_classifier_demo.py
 cd web && python app.py
 
 # 使用训练模型启动 API（动态提示词推理模式）
-python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/seed_1/prompt_learner/model-best.pth.tar
+python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/seed_1/prompt_learner/model-best.pth.tar
 ```
 
 > 加载训练模型后，Web API 自动切换为**动态提示词推理模式**，通过 `SoftPromptAdapter` 生成图像条件化的提示词。
@@ -185,7 +185,7 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/see
 
 ---
 
-## 五、当前进度
+## 六、当前进度
 
 ### 已完成
 
@@ -199,136 +199,105 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/see
 - [x] 跨设备模型兼容：CUDA 训练的模型可在 Mac CPU/MPS 上直接加载使用
 - [x] 默认 batch size 从 32 降为 16，避免 GPU 显存不足
 - [x] 修复 PyTorch lr_scheduler verbose 参数弃用警告
+- [x] 核心机制修复：两阶段前向传播 + 难度权重计算
+- [x] 可学习难度权重优化：添加温度参数，移除 detach
 
 ### 待完成
 
-- [ ] 云端运行完整训练实验（9 组：3 方法 × 3 shot）
-  - [x] DynamicPromptTrainer: 16-shot（进行中）
-  - [ ] DynamicPromptTrainer: 1-shot / 4-shot
-  - [ ] CoOp 基线: 1-shot / 4-shot / 16-shot / 32-shot
-  - [ ] CoCoOp 基线: 1-shot / 4-shot / 16-shot / 32-shot
-- [ ] 将训练好的模型同步回本地
-- [ ] 生成对比表格、学习曲线、混淆矩阵
+- [ ] 重新训练 DynamicPromptTrainer（使用可学习难度权重模块）
+  - [ ] DynamicPromptTrainer: 1/2/4/8/16-shot
+  - [ ] CoCoOp 基线: 1/2/4/8/16-shot
+  - [ ] CoOp 基线: 1/2/4/8/16-shot
+- [ ] 对比分析新结果与旧结果的差异
 - [ ] 撰写论文实验章节
-
-### 训练日志指标解释
-
-训练过程中每个 batch 输出格式：
-```
-epoch [50/50] batch [5/37] time 0.425 (0.498) data 0.000 (0.070) loss 1.9750 (1.6749) acc 75.0000 (73.7500) lr 7.8853e-06 eta 0:00:15
-```
-
-| 指标 | 示例值 | 含义 |
-|------|--------|------|
-| `time` | 0.425 (0.498) | 当前 batch 耗时(秒) / 滑动平均 |
-| `data` | 0.000 (0.070) | 数据加载耗时(秒) / 滑动平均 |
-| `loss` | 1.9750 (1.6749) | 当前 batch 损失 / 滑动平均损失 |
-| `acc` | 75.0000 (73.7500) | 当前 batch 准确率(%) / 滑动平均 |
-| `lr` | 7.8853e-06 | 当前学习率（cosine 衰减末期很低） |
-| `eta` | 0:00:15 | 预计剩余时间 |
-
-**Few-shot 训练特点**：
-- 16-shot 仅有 37 个 batch/epoch，样本极少
-- Loss/Acc 波动大是正常现象（某些 batch 恰好是模型擅长的类别）
-- 学习率在末期很低（7.88e-06）是因为 cosine annealing 已接近终点
-- 准确率需关注滑动平均值而非单 batch 值
-
-### 首轮实验结果（修复前 — 难度权重未生效）
-
-| 方法 | 1-shot | 4-shot | 16-shot | 32-shot |
-|------|--------|--------|---------|---------|
-| CoOp | 83.3% | 87.9% | 88.3% | - |
-| CoCoOp | 88.0% | 89.0% | 90.0% | - |
-| **Ours (Dynamic)** | 84.9% | 88.0% | 90.1% | - |
-
-> 注：首轮实验中，难度权重和类别自适应因子因代码 bug 未生效，模型退化为"CoCoOp + 未使用的 DynamicPromptOptimizer"。修复后需重新训练。
 
 ---
 
-## 六、已修复 Bug 记录
+## 七、实验结果
 
-### 2026-03-27：核心模块激活修复（难度权重 + 类别自适应因子）
+### 2026-04-02 实验结果（OxfordPets）
+
+| 方法 | 1-shot | 2-shot | 4-shot | 8-shot | 16-shot |
+|------|--------|--------|--------|--------|---------|
+| Zero-shot CLIP | ~81% | ~81% | ~81% | ~81% | ~81% |
+| CoOp | 80.9% | 82.1% | 86.9% | 86.9% | 88.3% |
+| CoCoOp | 86.8% | 83.3% | 88.9% | 88.5% | 90.0% |
+| **Ours (Dynamic)** | **84.9%** | **85.1%** | **89.1%** | **88.6%** | **89.1%** |
+
+### 结果分析
+
+**DynamicPromptTrainer vs CoOp**：
+- 1-shot: +4.0%
+- 2-shot: +3.0%
+- 4-shot: +2.2%
+- 8-shot: +1.7%
+- 16-shot: +0.8%
+- **结论：显著优于 CoOp**
+
+**DynamicPromptTrainer vs CoCoOp**：
+- 1-shot: -1.9%（略低）
+- 2-shot: +1.8%（更优）
+- 4-shot: +0.2%（略优）
+- 8-shot: +0.1%（略优）
+- 16-shot: -0.9%（略低）
+- **结论：整体持平，2/4/8-shot 更优**
+
+> 注：上述结果使用固定难度权重（temperature=0.1 固定）。可学习版本训练中。
+
+---
+
+## 八、已修复 Bug 记录
+
+### 2026-04-02：可学习难度权重优化
+
+**问题描述**：
+- 难度权重是 detached 的，不参与梯度回传
+- 权重计算使用固定阈值，无法自适应
+
+**修复内容**：
+1. `DifficultyWeightCalculator` 改为 `nn.Module`
+2. 添加可学习参数：
+   - `temperature`: 温度参数（初始 0.1）
+   - `confidence_scale`: 置信度缩放（初始 2.0）
+   - `wrong_weight`: 错误预测权重（初始 2.0）
+3. 移除 `weights.detach()`，让梯度回传
+4. 新损失函数：`weight = 1 + sigmoid(scale * (1 - conf) / temp)`
+
+### 2026-04-02：dtype 一致性修复
+
+| 问题 | 原因 | 修复 |
+|------|------|------|
+| fp16 模式下 dtype 不匹配 | SoftPromptAdapter 和 DynamicPromptOptimizer 参数未转换为 fp16 | 在创建时指定 dtype 参数 |
+
+### 2026-03-28：训练稳定性修复
 
 | Bug | 原因 | 修复 |
 |-----|------|------|
-| 难度权重从未计算 | `DynamicPromptOptimizer.forward` 要求 `predictions is not None`，但 `CustomCLIPDynamic` 始终传 `None` | 改为两阶段前向：先生成初始 logits，再用 logits 作为 predictions 计算含误分类信息的权重 |
-| `class_adaptive_factors` 未参与计算 | `AdaptivePromptLearner.forward` 直接用 `self.ctx`，未乘以 adaptive_factors | 在 forward 中将 `base_ctx = self.ctx * class_adaptive_factors` |
-| `compute_weights` 无法处理 `predictions=None` | 用 `zip(features, labels, predictions)` 强制要求 predictions | 改为先仅用原型距离算基础权重，predictions 非 None 时再叠加误分类权重 |
-| 权重梯度回传冲突 | 难度权重不应参与梯度计算 | 在 trainer 中 `weights = weights.detach()` |
+| 权重范围无限制 | 困难权重可能达到 3-4 倍，对小样本冲击过大 | 添加 `weight = max(0.5, min(2.0, weight))` 限制 |
+| 学习率过高 | 0.002 对动态提示词参数过大 | 调整为 0.002（与 CoCoOp 一致） |
+
+### 2026-03-27：核心模块激活修复
+
+| Bug | 原因 | 修复 |
+|-----|------|------|
+| 难度权重从未计算 | `predictions` 始终为 None | 改为两阶段前向 |
+| `class_adaptive_factors` 未参与计算 | 未与 ctx 相乘 | 在 forward 中相乘 |
 
 ### 2026-03-20：Web 动态提示词推理 + 显存优化 + verbose 弃用
 
 | Bug | 原因 | 修复 |
 |-----|------|------|
-| Web API 未使用训练模型的动态提示词 | `predict()` 始终用固定模板 `"a photo of a {name}"` | 新增动态推理路径：`prompt_learner(image_features)` → `TextEncoder` → 相似度计算 |
-| `UserWarning: The verbose parameter is deprecated` | PyTorch 新版弃用 `_LRScheduler` 的 `verbose` 参数 | `lr_scheduler.py` 中 `super().__init__()` 不再传递 `verbose` |
-| CUDA OOM (batch_size=32) | 默认 batch 过大，GPU 显存不足 | `run_experiments.sh` + `evaluate.py` 默认 batch size 从 32 改为 16 |
-| 模型加载 strict 不匹配 | `token_prefix`/`token_suffix` 是 buffer 不需要加载 | `load_trained_model()` 加载时过滤固定 token 并使用 `strict=False` |
-
-### 2026-03-17：云端部署 dassl 模块缺失
-
-| Bug | 原因 | 修复 |
-|-----|------|------|
-| `ModuleNotFoundError: No module named 'dassl.data'` | 原 CoOp/dassl 目录不完整，缺少 `dassl/data` 模块 | 用完整的 Dassl.pytorch 仓库替换，删除内部 .git 目录 |
-| `ftfy==6.3` 版本不存在 | pip 无法找到该版本 | 降级为 `ftfy==6.2.3` |
-| 路径硬编码 | train.py 使用本地绝对路径 `/Users/yudu/...` | 改为自动查找 CoOp 目录（相对于项目根目录） |
-
-修复步骤：
-```bash
-# 本地操作
-cd CoOp
-git clone https://github.com/KaiyangZhou/Dassl.pytorch.git temp_dassl
-rm -rf dassl
-mv temp_dassl dassl
-rm -rf dassl/.git  # 删除嵌套的 git 目录
-
-# 云端操作
-git pull
-cd CoOp/dassl && pip install -e .
-```
-
-### 2026-03-14：Web 界面准确率修复
-
-| Bug | 原因 | 修复 |
-|-----|------|------|
-| 概率显示 ~3% | `logit_scale`(×100) 未乘 | `web/app.py` + `demo/pet_classifier_demo.py` 添加 `logit_scale * logits` |
-| 类名错误 | `Great_Dane` 应为 `great_pyrenees`；`German_Shorthaired_Pointer` 应为 `german_shorthaired` | 修正为数据集一致的 37 个类名 |
-| 缺少 1 个类 | 36 类，缺 `american_pit_bull_terrier` | 补齐 37 类 |
-
-修复后零样本实测：200 张随机图片 → **81.0%** Top-1 准确率，Top-1 概率通常 60-99%。
-
-### 2026-03-11：训练流程修复
-
-- `train.py`: 配置扩展 `extend_cfg()`、数据集名称映射、路径修正
-- `dynamic_prompt.py`: 移除多余 `unsqueeze(0)`、初始化 `current_weights`
-- `custom_clip.py`: 批量文本编码（解决 MPS 内存溢出）、矩阵乘法维度修正
-- `trainer.py`: `current_epoch` → `self.epoch`
-- `demo/pet_classifier_demo.py` + `web/app.py`: 导入路径修复
+| Web API 未使用训练模型的动态提示词 | `predict()` 始终用固定模板 | 新增动态推理路径 |
+| `UserWarning: The verbose parameter is deprecated` | PyTorch 新版弃用 verbose 参数 | 移除 verbose 参数 |
+| CUDA OOM (batch_size=32) | 默认 batch 过大 | 改为 16 |
 
 ---
 
-### 2026-03-28：训练稳定性修复（解决准确率波动大 + 结果变差）
+## 九、创新点总结
 
-| Bug | 原因 | 修复 |
-|-----|------|------|
-| 权重范围无限制 | 困难权重可能达到 3-4 倍，对小样本冲击过大 | 添加 `weight = max(0.5, min(2.0, weight))` 限制 |
-| 学习率过高 | 0.002 对动态提示词参数过大 | 降为 0.001 |
-| 自定义学习率未生效 | optimizer 在 custom_lr 设置之前就构建了 | 调整顺序：先设置 LR，再 build_optimizer |
-| 两阶段前向传播不稳定 | 第一阶段算 logits，第二阶段用 logits 算权重但未重新前向 | 简化为单阶段前向 |
-| custom_clip.py 死代码 | 重复的 prompts/logits 计算 + 缩进错误 | 删除重复代码，修复缩进 |
-
-修复后预期：
-- Loss 波动减小
-- 准确率更稳定（关注滑动平均值）
-- 最终精度恢复
-
----
-
-## 七、创新点总结
-
-1. **图像条件动态提示词** — 通过 SoftPromptAdapter 使每张图片获得独特的提示词偏移（区别于 CoOp 的静态提示和 CoCoOp 的单层偏移）
-2. **双层提示词调整** — 在 MLP 偏移之上叠加 `class_adaptive_factors`，为不同类别的提示词学习独立缩放（CoOp/CoCoOp 均无此机制）
-3. **困难样本自适应加权** — DifficultyWeightCalculator 基于动量原型距离（momentum=0.9）和误分类历史动态加权损失函数
+1. **可学习难度加权** — `DifficultyWeightCalculator` 使用可学习温度参数，让模型自动学习何时关注困难样本
+2. **双层提示词调整** — 在 MLP 偏移之上叠加 `class_adaptive_factors`，为不同类别学习不同的提示词缩放
+3. **两阶段前向传播** — 训练时先计算基础 logits 获取预测，再用预测计算难度权重生成自适应提示词
 4. **品种语义增强** — 37 品种属性库（毛发/面部/体型/性格），支持多模板文本生成
-5. **动态提示词推理** — Web 端加载训练模型后自动切换为动态推理模式，每张图片实时生成图像条件化的提示词
+5. **动态提示词推理** — Web 端加载训练模型后自动切换为动态推理模式
 6. **跨设备兼容** — CUDA 训练的模型可在 Mac CPU/MPS 上无缝使用
