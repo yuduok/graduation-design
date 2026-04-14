@@ -20,11 +20,10 @@ class DifficultyWeightCalculator(nn.Module):
         self.momentum = momentum
         self.class_prototypes = {}
         
-        # 可学习参数 - 使用更温和的初始值
-        self.temperature = nn.Parameter(torch.tensor(0.5))  # 温度参数（更大=更温和的权重调整）
-        self.confidence_scale = nn.Parameter(torch.tensor(1.0))  # 置信度缩放（更温和）
-        self.wrong_weight = nn.Parameter(torch.tensor(1.5))  # 错误预测权重（减少过度惩罚）
-        self.low_conf_weight = nn.Parameter(torch.tensor(1.2))  # 低置信度权重（更温和）
+        self.temperature = nn.Parameter(torch.tensor(0.1))  
+        self.confidence_scale = nn.Parameter(torch.tensor(2.0)) 
+        self.wrong_weight = nn.Parameter(torch.tensor(2.0))  
+        self.low_conf_weight = nn.Parameter(torch.tensor(1.5))  
         
     def update_prototypes(self, features, labels):
         """更新每个类别的原型（特征中心）"""
