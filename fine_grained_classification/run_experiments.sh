@@ -8,16 +8,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # 用法: bash run_experiments.sh [device] [batch_size] [epochs_list] [backbone_list]
-# 示例: bash run_experiments.sh cuda 16 "50,100,100,100,100" "RN50"
+# 示例: bash run_experiments.sh cuda 16 "100,80,60,40,20" "RN50"
 #   - device: cuda 或 cpu (默认: cuda)
 #   - batch_size: 批大小 (默认: 16)
-#   - epochs_list: 1,2,4,8,16-shot 对应的 epoch 数，用逗号分隔 (默认: 50,100,100,100,100)
+#   - epochs_list: 1,2,4,8,16-shot 对应的 epoch 数，用逗号分隔 (默认: 100,80,60,40,20)
 #   - backbone_list: 逗号分隔的 backbone 名称 (默认: RN50)
 
 # 设备选择
 DEVICE="${1:-cuda}"
 BATCH_SIZE="${2:-16}"
-EPOCHS_LIST="${3:-50,100,100,100,100}"
+EPOCHS_LIST="${3:-100,80,60,40,20}"
 BACKBONE_LIST="${4:-RN50}"
 DATASET="oxford_pets"
 SEED=1
