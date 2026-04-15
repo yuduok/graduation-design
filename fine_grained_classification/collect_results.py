@@ -214,12 +214,12 @@ def collect_results(base_dir):
 
 
 def filter_and_group_results(results):
-    """过滤和整理结果，只保留 1, 4, 16, 32 shot 的 CoOp, CoCoOp, DynamicPromptTrainer"""
+    """过滤和整理结果，只保留 1, 2, 4, 8, 16 shot 的 CoOp, CoCoOp, DynamicPromptTrainer"""
     filtered = {}
     
     # 只保留这三个模型
     valid_trainers = {"CoOp", "CoCoOp", "DynamicPromptTrainer"}
-    valid_shots = {1, 4, 16, 32}
+    valid_shots = {1, 2, 4, 8, 16}
     
     for trainer, shots_data in results.items():
         if trainer not in valid_trainers:
@@ -320,7 +320,7 @@ def print_epoch_comparison_table(results):
 
 
 def print_comparison_table(results):
-    """打印对比表格"""
+    """打印对比表格（包含 epoch 信息）"""
     results = filter_and_group_results(results)
     
     trainers = sorted(results.keys())
@@ -332,16 +332,28 @@ def print_comparison_table(results):
         print("No results to display.")
         return
 
-    # 终端表格
-    print("\n" + "=" * 60)
-    print("  Comparison Table: Top-1 Accuracy (%)")
-    print("=" * 60)
+    # 获取每个 shot 配置的 epochs（从第一个 trainer 的数据）
+    shot_epochs = {}
+    for s in shots_list:
+        for trainer in trainers:
+            epochs = results[trainer].get(s, {}).get("epochs")
+            if epochs:
+                shot_epochs[s] = epochs
+                break
 
+    # 终端表格
+    print("\n" + "=" * 80)
+    print("  Comparison Table: Top-1 Accuracy (%)")
+    print("  Strategy: Adaptive Epochs (1-shot=100ep, 2-shot=80ep, 4-shot=60ep, 8-shot=40ep, 16-shot=20ep)")
+    print("=" * 80)
+
+    # Header with epochs
     header = f"{'Method':<25s}"
     for s in shots_list:
-        header += f" | {s:>2d}-shot"
+        ep_str = f"(ep{shot_epochs.get(s, '?')})" if shot_epochs.get(s) else ""
+        header += f" | {s:>2d}-shot {ep_str}"
     print(header)
-    print("-" * 60)
+    print("-" * 80)
 
     # 各方法结果
     for trainer in trainers:
@@ -352,16 +364,30 @@ def print_comparison_table(results):
         for s in shots_list:
             acc = results[trainer].get(s, {}).get("accuracy")
             if acc is not None:
-                row += f" | {acc:>6.1f}%"
+                row += f" | {acc:>6.1f}%     "
             else:
-                row += f" |    N/A"
+                row += f" |    N/A      "
         print(row)
 
-    print("=" * 60)
+    print("=" * 80)
+    
+    # 打印对比分析（Ours vs CoCoOp）
+    if "DynamicPromptTrainer" in results and "CoCoOp" in results:
+        print("\n  Comparison: Ours vs CoCoOp")
+        print("-" * 40)
+        for s in shots_list:
+            ours = results["DynamicPromptTrainer"].get(s, {}).get("accuracy")
+            cocoop = results["CoCoOp"].get(s, {}).get("accuracy")
+            if ours and cocoop:
+                diff = ours - cocoop
+                sign = "+" if diff > 0 else ""
+                status = "WIN" if diff > 0 else "LOSE" if diff < 0 else "TIE"
+                print(f"    {s:>2d}-shot: {ours:.1f}% vs {cocoop:.1f}% | {sign}{diff:.1f}% [{status}]")
+        print("-" * 40)
 
 
 def print_latex_table(results):
-    """生成 LaTeX 格式表格"""
+    """生成 LaTeX 格式表格（包含所有 5 种 shot 配置）"""
     results = filter_and_group_results(results)
     
     trainers = sorted(results.keys())
@@ -375,15 +401,19 @@ def print_latex_table(results):
     print("\n% LaTeX Table")
     print("\\begin{table}[h]")
     print("\\centering")
-    print("\\caption{Oxford-IIIT Pets 分类准确率对比 (\\%)}")
+    print("\\caption{Oxford-IIIT Pets 分类准确率对比 (自适应 Epoch 策略)}")
+    print("\\label{tab:comparison}")
 
     cols = "l" + "c" * len(shots_list)
     print(f"\\begin{{tabular}}{{{cols}}}")
     print("\\toprule")
 
+    # Header with epoch info
     header = "Method"
+    epoch_map = {1: 100, 2: 80, 4: 60, 8: 40, 16: 20}
     for s in shots_list:
-        header += f" & {s}-shot"
+        ep = epoch_map.get(s, "?")
+        header += f" & {s}-shot (ep{ep})"
     header += " \\\\"
     print(header)
     print("\\midrule")
@@ -569,15 +599,43 @@ def main():
             if args.plot:
                 plot_learning_curves(args.base_dir, results)
 
-            # 保存结果到 JSON
+            # 保存结果到 JSON（包含所有 5 种 shot 配置和 epoch 信息）
             json_path = os.path.join(args.base_dir, "experiment_summary.json")
             filtered_results = filter_and_group_results(results)
-            summary = {}
+            
+            # 构建更详细的 summary
+            summary = {
+                "experiment_date": "2026-04-13",
+                "strategy": "adaptive_epochs",
+                "epoch_config": {
+                    "1-shot": 100,
+                    "2-shot": 80,
+                    "4-shot": 60,
+                    "8-shot": 40,
+                    "16-shot": 20
+                },
+                "results": {}
+            }
+            
             for trainer, shots_data in filtered_results.items():
-                summary[trainer] = {}
-                for shots, data in shots_data.items():
-                    summary[trainer][str(int(shots))] = data.get("accuracy")
-
+                summary["results"][trainer] = {}
+                for shots, data in sorted(shots_data.items()):
+                    acc = data.get("accuracy")
+                    epochs = data.get("epochs")
+                    summary["results"][trainer][f"{shots}-shot"] = {
+                        "accuracy": acc,
+                        "epochs": epochs
+                    }
+            
+            # 添加对比分析
+            if "DynamicPromptTrainer" in summary["results"] and "CoCoOp" in summary["results"]:
+                summary["comparison_vs_cocoop"] = {}
+                for shot_config in ["1-shot", "2-shot", "4-shot", "8-shot", "16-shot"]:
+                    ours_acc = summary["results"]["DynamicPromptTrainer"].get(shot_config, {}).get("accuracy")
+                    cocoop_acc = summary["results"]["CoCoOp"].get(shot_config, {}).get("accuracy")
+                    if ours_acc and cocoop_acc:
+                        summary["comparison_vs_cocoop"][shot_config] = round(ours_acc - cocoop_acc, 2)
+            
             with open(json_path, "w") as f:
                 json.dump(summary, f, indent=2)
             print(f"\nResults saved to: {json_path}")
