@@ -129,6 +129,96 @@ CoCoOp（Conditional Context Optimization）~\cite{cocoop2022}在CoOp的基础�
 
 Oxford-IIIT Pets数据集~\cite{parkhi2012cats}是一个广泛使用的细粒度分类基准数据集，包含37个猫狗品种共7390张图像。该数据集的特点是品种间差异细微、图像质量参差不齐，对分类算法提出了较高要求。
 
+\section{方法}
+
+本章详细介绍所提出的DynamicPromptTrainer方法的核心设计，包括整体架构、各个模块的结构以及训练流程。
+
+\subsection{整体架构}
+
+DynamicPromptTrainer的整体架构如图所示。给定一张输入图像，模型首先通过冻结的CLIP视觉编码器提取图像特征，然后通过自适应提示词学习器生成图像条件化的文本提示词。冻结的CLIP文本编码器将生成的提示词编码为文本特征，最后通过计算图像特征与文本特征的相似度得到分类logits。在训练过程中，可学习的难度权重计算器对不同样本的损失进行自适应加权。
+
+具体而言，DynamicPromptTrainer包含三个核心模块：
+
+\begin{enumerate}
+\item 自适应提示词学习器（AdaptivePromptLearner）：在CoOp的静态可学习上下文向量基础上，引入类别自适应因子（class\_adaptive\_factors），使提示词能够针对不同类别进行差异化调整；
+\item 软提示适配器（SoftPromptAdapter）：通过两层MLP将图像特征映射为提示词偏移量，实现图像条件化的提示词生成；
+\item 可学习难度权重计算器（DifficultyWeightCalculator）：利用可学习的温度参数自动学习不同样本的重要性权重。
+\end{enumerate}
+
+\subsection{自适应提示词学习器}
+
+CoOp将提示词中的上下文词（如"a photo of a"）替换为$n_{ctx}$个可学习的连续向量$\mathbf{c}_1, \mathbf{c}_2, \ldots, \mathbf{c}_{n_{ctx}}$，其中每个向量的维度为$d=512$（与CLIP特征维度一致）。对于每个类别$c$，将上下文向量与类别名称的词嵌入拼接，得到完整的提示词嵌入序列。
+
+本文在CoOp的基础上引入了类别自适应因子$\boldsymbol{\alpha}_c \in \mathbb{R}^{d}$，用于对上下文向量进行逐元素缩放：
+
+\begin{equation}
+\mathbf{c}'_{i,c} = \mathbf{c}_i \odot \boldsymbol{\alpha}_c, \quad i = 1, 2, \ldots, n_{ctx}
+\end{equation}
+
+其中$\odot$表示逐元素乘法。类别自适应因子$\boldsymbol{\alpha}_c$是一个可学习的参数矩阵，其初始化值为全1向量。通过学习不同的$\boldsymbol{\alpha}_c$，模型可以为不同类别生成差异化的提示词表示。
+
+\subsection{软提示适配器}
+
+软提示适配器（SoftPromptAdapter）是一个轻量级的两层MLP网络，用于将图像特征映射为提示词偏移量。给定输入图像$\mathbf{x}$，首先通过冻结的CLIP视觉编码器提取图像特征$\mathbf{f}_v \in \mathbb{R}^d$，然后通过SoftPromptAdapter计算提示词偏移量：
+
+\begin{equation}
+\Delta\mathbf{c} = \text{MLP}(\mathbf{f}_v) = \mathbf{W}_2 \cdot \text{ReLU}(\mathbf{W}_1 \cdot \mathbf{f}_v)
+\end{equation}
+
+其中$\mathbf{W}_1 \in \mathbb{R}^{h \times d}$和$\mathbf{W}_2 \in \mathbb{R}^{d \times h}$是可学习的权重矩阵，$h = d/16 = 32$是隐藏层维度。最终的图像条件化提示词为：
+
+\begin{equation}
+\mathbf{c}^*_{i,c} = \mathbf{c}'_{i,c} + \Delta\mathbf{c}, \quad i = 1, 2, \ldots, n_{ctx}
+\end{equation}
+
+与CoCoOp的元网络类似，SoftPromptAdapter使得提示词能够根据输入图像的内容进行动态调整。不同之处在于，本文的方法在SoftPromptAdapter之上还叠加了类别自适应因子，实现了双层的提示词调整机制。
+
+\subsection{可学习难度权重计算器}
+
+在细粒度分类任务中，不同样本的分类难度存在显著差异。传统的交叉熵损失对所有样本赋予相同的权重，这可能导致模型过度关注简单样本而忽略困难样本。为了解决这一问题，本文设计了可学习的难度权重计算器（DifficultyWeightCalculator）。
+
+在训练过程中，模型采用两阶段前向传播策略：
+
+\begin{enumerate}
+\item 第一阶段（无梯度）：使用当前的提示词计算初始logits $\mathbf{z}$，并获取预测类别$\hat{y} = \arg\max(\mathbf{z})$和预测置信度$\text{conf} = \max(\text{softmax}(\mathbf{z}))$；
+\item 第二阶段（有梯度）：使用预测结果计算难度权重，生成自适应提示词并计算加权损失。
+\end{enumerate}
+
+难度权重的计算公式为：
+
+\begin{equation}
+w_i = 1 + \sigma\left(\frac{s \cdot (1 - \text{conf}_i)}{\tau}\right)
+\end{equation}
+
+其中$\sigma(\cdot)$是sigmoid函数，$s$是置信度缩放因子，$\tau$是温度参数，$s$和$\tau$均为可学习参数。当预测置信度较低时，权重$w_i$增大，使模型更加关注该样本；当预测置信度较高时，权重$w_i$趋近于1，表示该样本为简单样本。
+
+最终的加权交叉熵损失为：
+
+\begin{equation}
+\mathcal{L} = \frac{1}{N}\sum_{i=1}^{N} w_i \cdot \ell_{CE}(\mathbf{z}_i, y_i)
+\end{equation}
+
+其中$\ell_{CE}$是标准交叉熵损失，$N$是批次大小。
+
+\subsection{训练流程}
+
+Algorithm 1总结了DynamicPromptTrainer的训练流程。
+
+\begin{enumerate}
+\item 初始化可学习参数：上下文向量$\{\mathbf{c}_i\}$、类别自适应因子$\{\boldsymbol{\alpha}_c\}$、SoftPromptAdapter参数、DifficultyWeightCalculator参数；
+\item 对每个训练批次：
+  \begin{enumerate}
+  \item 提取图像特征$\mathbf{f}_v$（冻结编码器）；
+  \item 计算类别自适应上下文向量$\mathbf{c}'_{i,c} = \mathbf{c}_i \odot \boldsymbol{\alpha}_c$；
+  \item 计算图像条件化偏移量$\Delta\mathbf{c} = \text{SoftPromptAdapter}(\mathbf{f}_v)$；
+  \item 生成自适应提示词$\mathbf{c}^*_{i,c} = \mathbf{c}'_{i,c} + \Delta\mathbf{c}$；
+  \item 第一阶段：计算初始logits，获取预测和置信度（无梯度）；
+  \item 第二阶段：计算难度权重，生成最终提示词并计算加权损失（有梯度）；
+  \item 反向传播，更新所有可学习参数；
+  \end{enumerate}
+\item 返回训练好的模型。
+\end{enumerate}
+
 \section{实验}
 
 本章介绍本文方法的实验设置、数据集、对比方法以及实验结果分析。
