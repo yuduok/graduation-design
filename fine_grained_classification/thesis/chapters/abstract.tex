@@ -1,0 +1,4 @@
+随着深度学习和视觉语言预训练模型的快速发展，基于提示学习（Prompt Learning）的方法在计算机视觉任务中展现出巨大潜力。然而，现有的提示学习方法（如CoOp和CoCoOp）在处理细粒度分类任务时存在不足：CoOp使用静态提示词无法适应不同图像，CoCoOp虽引入图像条件化但缺乏对分类难度的感知能力。本文提出一种基于动态提示优化的细粒度猫狗分类方法（DynamicPromptTrainer），通过引入自适应提示词学习器（AdaptivePromptLearner）、软提示适配器（SoftPromptAdapter）和可学习难度权重计算器（DifficultyWeightCalculator）三个核心模块，实现提示词的动态生成与自适应加权。实验在Oxford-IIIT Pets数据集（37种猫狗品种）上进行，结果表明：本文方法在2-shot、4-shot、8-shot和16-shot设置下均优于CoCoOp基线，最高分类准确率达到89.8\%（16-shot），验证了动态提示优化策略在细粒度分类任务中的有效性。
+
+\vspace{\baselineskip}\noindent
+\textsf{关键词：}细粒度分类；提示学习；CLIP；动态提示优化；猫狗品种识别
