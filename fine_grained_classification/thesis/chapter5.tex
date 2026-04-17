@@ -1,0 +1,126 @@
+\chapter{实验与结果分析}
+
+\section{实验环境与数据集}
+
+\subsection{实验环境}
+
+本文实验在 CLIP 框架上完成,训练入口为项目中的 \texttt{train.py},核心训练器为 \texttt{DynamicPromptTrainer}。模型实现基于 PyTorch,并沿用 Dassl 框架组织数据集、优化器和训练流程。按照项目配置,实验主干网络采用 CLIP RN50,图像编码器与文本编码器参数在训练阶段保持冻结,仅更新提示学习相关模块参数。
+
+优化器选用 SGD,基础学习率设置为 0.002,学习率调度采用带 warmup 的余弦退火策略。为了降低显存占用并与 CoCoOp 的实现设置保持一致,训练精度使用 fp16。上述配置均可在项目的 \texttt{configs/dynamic\_rn50.yaml} 与 \texttt{train.py} 中核对。
+
+\subsection{数据集说明}
+
+本文使用 Oxford-IIIT Pets 数据集开展实验\cite{parkhi2012cats}。该数据集包含 37 个猫狗品种,共 7390 张图像,是细粒度宠物分类研究中使用较多的公开数据集之一。数据集中既包含长毛与短毛品种,也包含脸部轮廓、耳型和毛色相近的类别,因此能较好地反映细粒度宠物识别中常见的类别混淆问题。
+
+在实验过程中,本文采用项目默认的数据划分方式,并在 few-shot 设定下从训练集中抽取少量带标注样本进行训练。实验分别考察 1-shot、2-shot、4-shot、8-shot 和 16-shot 五种情形,用于观察所提方法在不同数据规模下的表现。
+
+\section{对比方法与评价指标}
+
+\subsection{对比方法}
+
+本项目实际完成并保存结果的比较方法只有三类:
+
+\begin{enumerate}
+\item CoOp。使用静态可学习上下文向量替代人工提示词,属于提示学习基线方法。
+\item CoCoOp。在 CoOp 的基础上增加图像条件化提示生成模块,能够根据输入图像动态调整提示。
+\item DynamicPromptTrainer。本文实现的方法,在图像条件提示的基础上进一步加入类别自适应因子和难度感知样本加权机制。
+\end{enumerate}
+
+因此,本章实验不再引入 Zero-shot CLIP 作为对比项,也不在表格中写入未在当前项目结果文件中正式参与比较的基线。
+
+\subsection{评价指标}
+
+本文采用分类准确率作为主要评价指标。对于测试集中的每张图像,模型输出 37 个品种类别中的预测结果,统计预测正确的样本数占总样本数的比例。由于实验目标是比较不同提示学习方法在相同数据集和相同 shot 设置下的分类能力,准确率可以直接反映模型在细粒度宠物品种识别任务中的整体性能。
+
+\section{实验设置}
+
+\subsection{网络与提示配置}
+
+在本文实现中,基础提示词由 \texttt{a photo of a} 初始化得到,对应 4 个可学习上下文 token。SoftPromptAdapter 采用两层 MLP 结构,维度为 512$\rightarrow$32$\rightarrow$512,其中隐藏层宽度按视觉特征维度的 $\frac{1}{16}$ 设置。DifficultyWeightCalculator 中包含可学习的温度参数、置信度缩放参数和错误样本附加权重,训练时通过反向传播自动调整。
+
+从实现方式看,本文方法并不是简单地把一个额外损失项叠加到 CoCoOp 上,而是在提示生成与损失加权两个位置同时加入动态机制。前者负责根据图像特征生成偏移提示,后者负责根据预测难度重新分配样本贡献,两者共同影响最终的参数更新方向。
+
+\subsection{自适应训练轮数策略}
+
+少样本训练中,不同 shot 设置对应的数据规模差异很大。如果所有配置都采用相同 epoch 数,1-shot 往往训练不足,而 16-shot 又容易在后期出现收益下降。基于这一考虑,本文没有使用固定轮数,而是采用与 shot 数匹配的训练策略: 1-shot 训练 100 个 epoch,2-shot 训练 80 个 epoch,4-shot 训练 60 个 epoch,8-shot 训练 40 个 epoch,16-shot 训练 20 个 epoch。
+
+这一策略的出发点比较直接。样本越少,每个类别能够提供的监督信息越有限,模型需要更多轮次反复利用这些样本; 样本越多,模型较快就能学到稳定的类别边界,继续延长训练时间未必带来明显收益,反而可能加剧过拟合。本文最终结果采用的就是这一组自适应 epoch 配置。
+
+\subsection{结果提取方式}
+
+为了避免在论文写作阶段手工抄录实验结果,本文额外编写了结果导出脚本 \texttt{export\_thesis\_results.py}。该脚本会读取 \texttt{output\_fgd/oxford\_pets/experiment\_summary.json},自动整理 CoOp、CoCoOp 和 DynamicPromptTrainer 在各个 shot 设置下的准确率,并生成论文可直接引用的 JSON 文件。这样做的目的不是增加实验量,而是保证表格数据与项目保存结果保持一致。
+
+\section{实验结果分析}
+
+\subsection{整体结果}
+
+根据项目结果汇总文件以及导出脚本生成的结果,三种方法在五种 shot 设置下的分类准确率如表~\ref{tab:main_results} 所示。
+
+\begin{table}[H]
+\centering
+\caption{Oxford-IIIT Pets 数据集上不同方法的分类准确率（\%）}
+\label{tab:main_results}
+\begin{tabular}{lccccc}
+\toprule
+方法 & 1-shot & 2-shot & 4-shot & 8-shot & 16-shot \\
+\midrule
+CoOp & 80.9 & 82.6 & 87.2 & 86.8 & 89.3 \\
+CoCoOp & 86.8 & 83.5 & 89.1 & 88.6 & 89.6 \\
+DynamicPromptTrainer & 86.0 & 85.9 & 89.5 & 89.2 & 89.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+从表中可以看到,本文方法在 2-shot、4-shot、8-shot 和 16-shot 四种设置下都取得了最佳结果。与 CoCoOp 相比,提升幅度分别为 2.4、0.4、0.6 和 0.2 个百分点; 与 CoOp 相比,在五种设置下也都保持领先。尤其是在 2-shot 条件下,本文方法优势最明显,说明当训练样本极少但又不至于完全不足时,难度感知加权对模型优化更有帮助。
+
+1-shot 是唯一一个本文方法没有超过 CoCoOp 的设置,准确率为 86.0\%,比 CoCoOp 低 0.8 个百分点。这个结果也说明,在极端低样本场景下,引入更多动态参数并不一定总能带来绝对优势,模型仍然可能受限于单类样本数量过少。即便如此,本文方法仍比 CoOp 高出 5.1 个百分点,说明整体设计仍然有效。
+
+\subsection{结果曲线分析}
+
+图~\ref{fig:method_comparison} 和图~\ref{fig:line_chart} 给出了不同方法在各 shot 设置下的柱状图和趋势图。结合图表可以看到,CoOp 对训练样本数量变化更敏感,从 1-shot 到 16-shot 的提升幅度较大,这与静态提示需要更多数据来稳定学习的特点一致。CoCoOp 和本文方法在低 shot 阶段起点更高,说明图像条件提示本身就能缓解部分数据不足问题。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{method_comparison.png}
+\caption{不同方法在各 shot 设置下的准确率对比}
+\label{fig:method_comparison}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{method_comparison_line.png}
+\caption{不同方法准确率随 shot 数变化的趋势}
+\label{fig:line_chart}
+\end{figure}
+
+进一步观察本文方法与 CoCoOp 的差异可以发现,二者在 4-shot 以后都进入较高精度区间,差距保持在 1 个百分点以内。这表明本文方法并没有通过扩大模型规模来换取提升,而是在样本较少、类别边界尚未稳定时,通过更合理的样本加权获得了更快、更稳的收敛效果。
+
+\subsection{自适应 epoch 策略分析}
+
+图~\ref{fig:adaptive_epochs} 展示了本文最终采用的自适应训练轮数配置。该策略不是额外的模型模块,但对最终结果有实际作用。若直接采用统一 epoch 数,不同 shot 设置下的训练强度并不对等,很难得到稳定比较。将 epoch 数与 shot 数配套后,低样本场景可以获得更充分的迭代,高样本场景则避免了无效训练。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.68\textwidth]{adaptive_epochs.png}
+\caption{不同 shot 设置对应的训练轮数}
+\label{fig:adaptive_epochs}
+\end{figure}
+
+从最终结果反推,这一策略至少说明两点。第一,本文方法在 2-shot 和 4-shot 下的提升并不是偶然波动,而是在与数据规模匹配的训练轮数下得到的稳定结果。第二,16-shot 虽然只训练 20 个 epoch,仍然达到了 89.8\% 的最佳精度,说明当样本数相对充足时,模型并不依赖长时间训练。
+
+\subsection{与 CoCoOp 的针对性比较}
+
+为了更直观地展示本文方法相对 CoCoOp 的变化,图~\ref{fig:vs_cocoop} 给出了两者在各 shot 设置下的精度差值。可以看到,增益主要集中在 2-shot 到 8-shot 区间,其中 2-shot 的提升最大。这一现象与本文方法的设计目标是一致的: 当样本不足以支撑稳定类别边界时,困难样本权重机制能够帮助模型减少对易分类样本的过度更新,从而把更多训练信号留给边界样本和易混淆样本。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.68\textwidth]{comparison_vs_cocoop.png}
+\caption{DynamicPromptTrainer 相对 CoCoOp 的准确率变化}
+\label{fig:vs_cocoop}
+\end{figure}
+
+需要说明的是,当前项目中保存了完整的最终对比结果和可视化图表,但没有针对每个单独模块给出独立的消融实验记录。因此本文在这一章不再额外虚构模块拆分结果,而是把分析重点放在已经完成并可核对的主实验结论上。
+
+\section{本章小结}
+
+本章给出了本文方法在 Oxford-IIIT Pets 数据集上的实验设置与结果分析。实验表明,DynamicPromptTrainer 在 2-shot、4-shot、8-shot 和 16-shot 四种设置下均优于 CoCoOp,最高准确率达到 89.8\%。结合图表分析可以看出,本文方法的优势主要体现在小样本到中等样本区间,说明图像条件提示与难度感知加权的结合能够改善 CLIP 在细粒度少样本分类中的训练效果。

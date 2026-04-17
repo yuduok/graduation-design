@@ -1,0 +1,93 @@
+{
+  "main_experiments": {
+    "experiment_date": "2026-04-13",
+    "strategy": "adaptive_epochs",
+    "epoch_config": {
+      "1-shot": 100,
+      "2-shot": 80,
+      "4-shot": 60,
+      "8-shot": 40,
+      "16-shot": 20
+    },
+    "results": {
+      "DynamicPromptTrainer": {
+        "1-shot": {
+          "accuracy": 86.0,
+          "epochs": 100
+        },
+        "2-shot": {
+          "accuracy": 85.9,
+          "epochs": 80
+        },
+        "4-shot": {
+          "accuracy": 89.5,
+          "epochs": 60
+        },
+        "8-shot": {
+          "accuracy": 89.2,
+          "epochs": 40
+        },
+        "16-shot": {
+          "accuracy": 89.8,
+          "epochs": 20
+        }
+      },
+      "CoOp": {
+        "1-shot": {
+          "accuracy": 80.9,
+          "epochs": 100
+        },
+        "2-shot": {
+          "accuracy": 82.6,
+          "epochs": 80
+        },
+        "4-shot": {
+          "accuracy": 87.2,
+          "epochs": 60
+        },
+        "8-shot": {
+          "accuracy": 86.8,
+          "epochs": 40
+        },
+        "16-shot": {
+          "accuracy": 89.3,
+          "epochs": 20
+        }
+      },
+      "CoCoOp": {
+        "1-shot": {
+          "accuracy": 86.8,
+          "epochs": 100
+        },
+        "2-shot": {
+          "accuracy": 83.5,
+          "epochs": 80
+        },
+        "4-shot": {
+          "accuracy": 89.1,
+          "epochs": 60
+        },
+        "8-shot": {
+          "accuracy": 88.6,
+          "epochs": 40
+        },
+        "16-shot": {
+          "accuracy": 89.6,
+          "epochs": 20
+        }
+      }
+    },
+    "comparison_vs_cocoop": {
+      "1-shot": -0.8,
+      "2-shot": 2.4,
+      "4-shot": 0.4,
+      "8-shot": 0.6,
+      "16-shot": 0.2
+    }
+  },
+  "security_experiments": {},
+  "notes": {
+    "main_source": "output_fgd/oxford_pets/experiment_summary.json",
+    "security_source_dir": "security_results"
+  }
+}
