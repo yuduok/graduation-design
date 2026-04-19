@@ -3,17 +3,25 @@ from utils import one_hot_embedding
 # from models.model import *
 import torch.nn.functional as F
 import functools
-from autoattack import AutoAttack
 from func import clip_img_preprocessing, multiGPU_CLIP, multiGPU_CLIP_image_logits
+
+try:
+    from autoattack import AutoAttack
+except ImportError:
+    AutoAttack = None
 
 lower_limit, upper_limit = 0, 1
 def clamp(X, lower_limit, upper_limit):
     return torch.max(torch.min(X, upper_limit), lower_limit)
 
 
+def _zeros_like_input(X):
+    return torch.zeros_like(X, device=X.device)
+
+
 def attack_CW(args, prompter, model, model_text, model_image, add_prompter, criterion, X, target, text_tokens, alpha,
               attack_iters, norm, restarts=1, early_stop=True, epsilon=0):
-    delta = torch.zeros_like(X).cuda()
+    delta = _zeros_like_input(X)
     if norm == "l_inf":
         delta.uniform_(-epsilon, epsilon)
     elif norm == "l_2":
@@ -36,7 +44,7 @@ def attack_CW(args, prompter, model, model_text, model_image, add_prompter, crit
 
         num_class = output.size(1)
         label_mask = one_hot_embedding(target, num_class)
-        label_mask = label_mask.cuda()
+        label_mask = label_mask.to(X.device)
 
         correct_logit = torch.sum(label_mask * output, dim=1)
         wrong_logit, _ = torch.max((1 - label_mask) * output - 1e4 * label_mask, axis=1)
@@ -64,7 +72,7 @@ def attack_CW(args, prompter, model, model_text, model_image, add_prompter, crit
 
 def attack_CW_noprompt(args, prompter, model, model_text, model_image, criterion, X, target, text_tokens, alpha,
                        attack_iters, norm, restarts=1, early_stop=True, epsilon=0):
-    delta = torch.zeros_like(X).cuda()
+    delta = _zeros_like_input(X)
     if norm == "l_inf":
         delta.uniform_(-epsilon, epsilon)
     elif norm == "l_2":
@@ -87,7 +95,7 @@ def attack_CW_noprompt(args, prompter, model, model_text, model_image, criterion
 
         num_class = output.size(1)
         label_mask = one_hot_embedding(target, num_class)
-        label_mask = label_mask.cuda()
+        label_mask = label_mask.to(X.device)
 
         correct_logit = torch.sum(label_mask * output, dim=1)
         wrong_logit, _ = torch.max((1 - label_mask) * output - 1e4 * label_mask, axis=1)
@@ -314,7 +322,7 @@ def attack_unlabelled_cosine(model, X, prompter, add_prompter, alpha, attack_ite
 
 def attack_pgd(args, prompter, model, model_text, model_image, add_prompter, criterion, X, target, alpha,
                attack_iters, norm, text_tokens=None, restarts=1, early_stop=True, epsilon=0, dataset_name=None):
-    delta = torch.zeros_like(X).cuda()
+    delta = _zeros_like_input(X)
     if norm == "l_inf":
         delta.uniform_(-epsilon, epsilon)
     elif norm == "l_2":
@@ -370,7 +378,7 @@ def attack_pgd(args, prompter, model, model_text, model_image, add_prompter, cri
 
 def attack_pgd_noprompt(args, prompter, model, model_text, model_image, criterion, X, target, text_tokens, alpha,
                         attack_iters, norm, restarts=1, early_stop=True, epsilon=0):
-    delta = torch.zeros_like(X).cuda()
+    delta = _zeros_like_input(X)
     if norm == "l_inf":
         delta.uniform_(-epsilon, epsilon)
     elif norm == "l_2":
@@ -409,6 +417,10 @@ def attack_pgd_noprompt(args, prompter, model, model_text, model_image, criterio
 
 def attack_auto(model, images, target, text_tokens, prompter, add_prompter,
                          attacks_to_run=['apgd-ce', 'apgd-dlr'], epsilon=0):
+    if AutoAttack is None:
+        raise ImportError(
+            "autoattack is not installed. Install it before using --test_attack_type autoattack."
+        )
 
     forward_pass = functools.partial(
         multiGPU_CLIP_image_logits,
