@@ -455,14 +455,17 @@ def main():
 
     clip_model = load_clip_to_cpu(cfg)
     clip_model.float()
-    clip_model.to(device)
     for param in clip_model.parameters():
         param.requires_grad_(False)
 
-    victim = DynamicPromptVictimCore(clip_model, classnames).to(device)
+    # Build the prompt learner on CPU first. AdaptivePromptLearner creates
+    # token tensors on CPU during initialization, so moving CLIP to CUDA
+    # beforehand triggers a device mismatch in token_embedding().
+    victim = DynamicPromptVictimCore(clip_model, classnames)
     checkpoint_path = resolve_model_path(args)
     checkpoint = load_checkpoint_compat(str(checkpoint_path))
     victim.load_prompt_weights(checkpoint["state_dict"])
+    victim.to(device)
     victim.eval()
 
     model = ModuleWrapper(victim).to(device)
