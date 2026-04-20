@@ -46,6 +46,7 @@
 \RequirePackage{indentfirst}
 \RequirePackage[numbers,sort&compress,comma]{natbib}
 \RequirePackage{hyperref}
+\hypersetup{hidelinks}
 \RequirePackage{pdfpages}
 
 \setmainfont{Times New Roman}
