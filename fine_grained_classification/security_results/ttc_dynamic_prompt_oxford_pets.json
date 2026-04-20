@@ -1,0 +1,28 @@
+{
+  "clean_acc": 85.85445625511038,
+  "clean_ttc_acc": 68.05669119651131,
+  "adv_acc": 0.08176614881439084,
+  "adv_ttc_acc": 71.62714636140637,
+  "adv_ttc_gain": 71.545380212592,
+  "clean_ttc_delta": -17.797765058599072,
+  "mean_clean_tau": 0.9452955266311014,
+  "mean_adv_tau": 1.0470421843679505,
+  "num_samples": 3669,
+  "dataset": "oxford_pets",
+  "shots": 1,
+  "seed": 1,
+  "checkpoint": "/home/zengyule/graduation-design/fine_grained_classification/output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/seed_1/prompt_learner/model.pth.tar-100",
+  "attack": {
+    "type": "pgd",
+    "epsilon": 0.00392156862745098,
+    "alpha": 0.00392156862745098,
+    "num_steps": 10
+  },
+  "ttc": {
+    "epsilon": 0.011764705882352941,
+    "step_size": 0.00392156862745098,
+    "num_steps": 2,
+    "tau_threshold": 0.6,
+    "beta": 1.0
+  }
+}
