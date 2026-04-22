@@ -51,6 +51,7 @@ tar -xzf annotations.tar.gz
 ```
 
 目录结构：
+
 ```
 毕业设计/
 ├── CoOp/                        # CoOp 框架（含 CLIP + Dassl）
@@ -73,18 +74,41 @@ fine_grained_classification/
 ├── run_experiments.sh           # 自动化批量实验脚本
 ├── requirements.txt             # Python 依赖
 ├── configs/
-│   └── dynamic_rn50.yaml        # 训练超参配置
+│   ├── dynamic_rn50.yaml        # RN50 训练超参配置
+│   └── dynamic_vitb16.yaml      # ViT-B/16 训练超参配置
 ├── models/
+│   ├── __init__.py              # 模型模块导出
 │   ├── custom_clip.py           # 自定义 CLIP（整合动态提示 + 语义增强）
 │   ├── dynamic_prompt.py        # AdaptivePromptLearner + SoftPromptAdapter
 │   ├── trainer.py               # DynamicPromptTrainer（注册到 Dassl）
-│   └── breed_semantic.py        # 品种属性库（37 品种特征描述）
+│   ├── breed_semantic.py        # 品种属性库（37 品种特征描述）
+│   ├── adversarial_defense.py   # 对抗性防御模块（TTC）
+│   └── robust_custom_clip.py    # 鲁棒 CLIP 模型
 ├── demo/
-│   └── pet_classifier_demo.py   # Streamlit 交互演示
+│   └── pet_classifier_demo.py   # Streamlit 交互演示（研究增强版）
 ├── web/
-│   └── app.py                   # Flask REST API 服务
-└── utils/
-    └── helpers.py               # 可视化与度量工具
+│   ├── app.py                   # Flask REST API 服务（研究增强版）
+│   └── static/
+│       └── index.html           # 前端演示页面
+├── utils/
+│   └── helpers.py               # 可视化与度量工具
+├── output_fgd/                  # 实验输出目录
+│   └── oxford_pets/
+│       ├── CoOp/                # CoOp 实验结果
+│       ├── CoCoOp/              # CoCoOp 实验结果
+│       ├── DynamicPromptTrainer/ # DynamicPrompt 实验结果
+│       └── experiment_summary.json # 实验结果摘要
+├── comparison_results/          # 模型对比结果
+│   ├── accuracy_comparison.png
+│   ├── confidence_distribution.png
+│   ├── top_k_accuracies.png
+│   └── comparison_summary.json
+├── security_results/            # 对抗防御实验结果
+├── thesis/                      # 毕业论文 LaTeX 源文件
+│   ├── main.tex
+│   ├── chapters/
+│   └── thesis_figures/
+└── thesis_figures/              # 论文图表
 ```
 
 ## 快速开始
@@ -126,6 +150,7 @@ python collect_results.py --latex --plot     # 生成 LaTeX 表格和图表
 ```
 
 **对比脚本功能**：
+
 - 准确率对比（整体准确率）
 - Top-K 准确率（Top-1, Top-3, Top-5）
 - 置信度分布分析（正确/错误预测的置信度对比）
@@ -137,16 +162,51 @@ python collect_results.py --latex --plot     # 生成 LaTeX 表格和图表
 
 ### 启动演示
 
+#### 1. Flask API 服务（推荐）
+
+```bash
+cd web
+
+# 使用训练好的模型启动（动态提示词推理模式）
+python app.py --shot 16 --port 5001
+
+# 或指定具体模型路径
+python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/seed_1/prompt_learner/model.pth.tar-20 --port 5001
+
+# Zero-shot 模式（不加载训练模型）
+python app.py --port 5001
+```
+
+API 服务启动后：
+
+- 前端页面：`http://localhost:5001/`
+- API 文档：见页面底部或访问 `/api/health`
+
+**API 端点**：
+
+| 端点                  | 方法   | 功能                                |
+| :------------------ | :--- | :-------------------------------- |
+| `/api/classify`     | POST | 单图分类（支持对比模式）                      |
+| `/api/compare`      | POST | 多模型对比（DynamicPrompt vs Zero-shot） |
+| `/api/breeds`       | GET  | 获取所有品种列表                          |
+| `/api/breed/<name>` | GET  | 获取品种详情（属性/提示词模板）                  |
+| `/api/experiments`  | GET  | 获取实验结果摘要                          |
+| `/api/model-info`   | GET  | 获取当前模型信息                          |
+| `/api/health`       | GET  | 健康检查                              |
+
+#### 2. Streamlit 交互演示
+
 ```bash
 # Streamlit 界面 → http://localhost:8501
 streamlit run demo/pet_classifier_demo.py
-
-# Flask API → http://localhost:5001（zero-shot 模式）
-cd web && python app.py
-
-# 使用训练好的模型启动 API（动态提示词推理模式）
-python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_1/seed_1/prompt_learner/model-best.pth.tar
 ```
+
+功能标签页：
+
+- **🔍 分类演示** - 上传图片，选择提示词模式，对比 Zero-shot
+- **📊 研究结果** - 实验数据表格、方法对比、自适应 Epoch 策略
+- **📚 品种知识库** - 37 种猫狗品种属性浏览（毛发/面部/体型/性格）
+- **🔌 API 文档** - 完整接口说明
 
 > 加载训练模型后，Web API 会自动切换为**动态提示词推理模式**：对每张上传图片，
 > 通过 `SoftPromptAdapter` 生成图像条件化的提示词再编码，而非使用固定文本模板。
@@ -169,14 +229,14 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 
 ### 动态提示词 vs CoOp vs CoCoOp
 
-| 特性 | CoOp | CoCoOp | **本系统（DynamicPromptTrainer）** |
-|------|------|--------|----------------------------------|
-| 提示词类型 | 静态可学习 ctx | 图像条件偏移 | 图像条件偏移 + 可学习难度加权 |
-| 核心参数 | `ctx` | `ctx` + `meta_net` | `ctx` + `SoftPromptAdapter` + `DifficultyWeightCalculator` + `class_adaptive_factors` |
-| 是否感知图像 | 否 | 是 | 是 |
-| 是否感知难度 | 否 | 否 | **是（可学习）** |
-| 损失函数 | 标准 CE | 标准 CE | **加权 CE（困难样本权重可学习）** |
-| 提示词层数 | 单层静态 | 单层偏移 | **双层（MLP 偏移 + 类别自适应因子）** |
+| 特性     | CoOp      | CoCoOp             | **本系统（DynamicPromptTrainer）**                                                         |
+| :----- | :-------- | :----------------- | :------------------------------------------------------------------------------------ |
+| 提示词类型  | 静态可学习 ctx | 图像条件偏移             | 图像条件偏移 + 可学习难度加权                                                                      |
+| 核心参数   | `ctx`     | `ctx` + `meta_net` | `ctx` + `SoftPromptAdapter` + `DifficultyWeightCalculator` + `class_adaptive_factors` |
+| 是否感知图像 | 否         | 是                  | 是                                                                                     |
+| 是否感知难度 | 否         | 否                  | **是（可学习）**                                                                            |
+| 损失函数   | 标准 CE     | 标准 CE              | **加权 CE（困难样本权重可学习）**                                                                  |
+| 提示词层数  | 单层静态      | 单层偏移               | **双层（MLP 偏移 + 类别自适应因子）**                                                              |
 
 ### 核心创新
 
@@ -185,10 +245,9 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
    - `confidence_scale`: 控制权重放大程度
    - `wrong_weight`: 错误预测样本的额外权重
    - 移除 `detach()`，让梯度回传使这些参数可学习
-
 2. **双层提示词调整** — 在 `SoftPromptAdapter` 的图像条件偏移之上叠加 `class_adaptive_factors`，为不同类别学习不同的提示词缩放
-
 3. **两阶段前向传播** — 训练时先计算基础 logits 获取预测，再用预测计算难度权重生成自适应提示词
+4. **品种语义增强** — 37 品种属性数据库（毛发/面部/体型/性格），支持多模板文本生成
 
 ### 工作流程
 
@@ -203,29 +262,31 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 
 ### 核心模块
 
-| 模块 | 文件 | 说明 |
-|------|------|------|
-| AdaptivePromptLearner | `models/dynamic_prompt.py` | 整合双层提示词生成（偏移 + 类别因子） |
-| SoftPromptAdapter | `models/dynamic_prompt.py` | 512→32→512 MLP 生成图像条件偏移（vis_dim//16） |
-| DifficultyWeightCalculator | `models/dynamic_prompt.py` | 可学习难度权重计算器（温度参数） |
-| DynamicPromptOptimizer | `models/dynamic_prompt.py` | 难度权重计算 + 类别自适应因子 |
-| BreedAttributeDatabase | `models/breed_semantic.py` | 37 品种属性库（毛发/面部/体型） |
-| SemanticEnhancer | `models/breed_semantic.py` | 多模板语义增强 |
+| 模块                         | 文件                         | 说明                                    |
+| :------------------------- | :------------------------- | :------------------------------------ |
+| AdaptivePromptLearner      | `models/dynamic_prompt.py` | 整合双层提示词生成（偏移 + 类别因子）                  |
+| SoftPromptAdapter          | `models/dynamic_prompt.py` | 512→32→512 MLP 生成图像条件偏移（vis\_dim//16） |
+| DifficultyWeightCalculator | `models/dynamic_prompt.py` | 可学习难度权重计算器（温度参数）                      |
+| DynamicPromptOptimizer     | `models/dynamic_prompt.py` | 难度权重计算 + 类别自适应因子                      |
+| BreedAttributeDatabase     | `models/breed_semantic.py` | 37 品种属性库（毛发/面部/体型）                    |
+| SemanticEnhancer           | `models/breed_semantic.py` | 多模板语义增强                               |
+| TextEncoder                | `models/custom_clip.py`    | CLIP 文本编码器封装                          |
+| DynamicPromptTrainer       | `models/trainer.py`        | Dassl 注册的训练器                          |
 
 ## 训练配置
 
 主要超参数（`configs/dynamic_rn50.yaml`）：
 
-| 参数 | 值 |
-|------|-----|
-| Backbone | CLIP RN50 |
-| 优化器 | SGD (lr=0.002) | 与 CoCoOp 保持一致 |
-| 学习率调度 | Cosine Annealing + warmup 1 epoch |
-| 训练轮次 | 50-100（根据 shot 数） |
-| 可学习 ctx | 4 tokens，初始化为 "a photo of a" |
-| SoftPromptAdapter | 512→32→512 MLP（vis_dim//16） |
-| 难度权重 | 可学习温度参数，初始 temperature=0.1 |
-| 精度 | fp16 | 与 CoCoOp 一致，加速训练 |
+| 参数                | 值                                 | <br />           |
+| :---------------- | :-------------------------------- | :--------------- |
+| Backbone          | CLIP RN50                         | <br />           |
+| 优化器               | SGD (lr=0.002)                    | 与 CoCoOp 保持一致    |
+| 学习率调度             | Cosine Annealing + warmup 1 epoch | <br />           |
+| 训练轮次              | 50-100（根据 shot 数）                 | <br />           |
+| 可学习 ctx           | 4 tokens，初始化为 "a photo of a"      | <br />           |
+| SoftPromptAdapter | 512→32→512 MLP（vis\_dim//16）      | <br />           |
+| 难度权重              | 可学习温度参数，初始 temperature=0.1        | <br />           |
+| 精度                | fp16                              | 与 CoCoOp 一致，加速训练 |
 
 ## 实验结果
 
@@ -235,16 +296,16 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 
 || 方法 | 1-shot (ep100) | 2-shot (ep80) | 4-shot (ep60) | 8-shot (ep40) | 16-shot (ep20) |
 ||------|----------------|----------------|----------------|----------------|-----------------|
-|| Zero-shot CLIP | ~81% | ~81% | ~81% | ~81% | ~81% |
+|| Zero-shot CLIP | \~81% | \~81% | \~81% | \~81% | \~81% |
 || CoOp | 80.9% | 82.6% | 87.2% | 86.8% | 89.3% |
 || CoCoOp | 86.8% | 83.5% | 89.1% | 88.6% | 89.6% |
 || **Ours (Dynamic)** | **86.0%** | **85.9%** | **89.5%** | **89.2%** | **89.8%** |
 
 **结论**：
-|- DynamicPromptTrainer 在 2/4/8/16-shot 上均优于 CoCoOp
-|- DynamicPromptTrainer 在 1-shot 上略低于 CoCoOp（-0.8%）
-|- **整体显著优于 CoOp**（1-shot 提升 +5.1%，4-shot 提升 +2.3%，16-shot 提升 +0.5%）
-|- **最佳结果**：16-shot 达到 **89.8%**，超越所有基线方法
+\|- DynamicPromptTrainer 在 2/4/8/16-shot 上均优于 CoCoOp
+\|- DynamicPromptTrainer 在 1-shot 上略低于 CoCoOp（-0.8%）
+\|- **整体显著优于 CoOp**（1-shot 提升 +5.1%，4-shot 提升 +2.3%，16-shot 提升 +0.5%）
+\|- **最佳结果**：16-shot 达到 **89.8%**，超越所有基线方法
 
 ### 对比分析（Ours vs CoCoOp）
 
@@ -263,6 +324,7 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 ### 2026-04-13：自适应 Epoch 策略 + 最终实验结果
 
 **训练策略优化**：
+
 1. **自适应 Epoch 配置** — Few-shot 数越少，训练 Epoch 越多：
    - 1-shot → 100 epochs（最需要充分学习）
    - 2-shot → 80 epochs
@@ -271,13 +333,15 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
    - 16-shot → 20 epochs（数据充足，避免过拟合）
 
 **最终实验结果**：
-| Method | 1-shot | 2-shot | 4-shot | 8-shot | 16-shot |
-|--------|--------|--------|--------|--------|---------|
-| DynamicPromptTrainer | 86.0% | 85.9% | 89.5% | 89.2% | **89.8%** |
-| CoCoOp | 86.8% | 83.5% | 89.1% | 88.6% | 89.6% |
-| CoOp | 80.9% | 82.6% | 87.2% | 86.8% | 89.3% |
+
+| Method               | 1-shot | 2-shot | 4-shot | 8-shot | 16-shot   |
+| :------------------- | :----- | :----- | :----- | :----- | :-------- |
+| DynamicPromptTrainer | 86.0%  | 85.9%  | 89.5%  | 89.2%  | **89.8%** |
+| CoCoOp               | 86.8%  | 83.5%  | 89.1%  | 88.6%  | 89.6%     |
+| CoOp                 | 80.9%  | 82.6%  | 87.2%  | 86.8%  | 89.3%     |
 
 **关键发现**：
+
 - DynamicPromptTrainer 在 2/4/8/16-shot 上全面超越 CoCoOp
 - 最佳结果：16-shot 达到 **89.8%**
 - 1-shot 差距缩小至 -0.8%（之前为 -1.9%）
@@ -285,35 +349,33 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 ### 2026-04-02：可学习难度权重优化
 
 **修复内容**：
+
 1. **两阶段前向传播修复** — `CustomCLIPDynamic.forward()` 现在正确实现两阶段前向：
    - 阶段1：使用基础提示词计算初始 logits（无梯度）
    - 阶段2：使用初始 logits 计算难度权重，生成自适应提示词
-
 2. **SoftPromptAdapter 优化** — 隐藏层维度改为 `vis_dim // 16`（32 for RN50），与 CoCoOp 一致
-
 3. **可学习难度权重** — `DifficultyWeightCalculator` 改为 `nn.Module`，添加可学习参数：
    - `temperature`: 温度参数（初始 0.1）
    - `confidence_scale`: 置信度缩放（初始 2.0）
    - `wrong_weight`: 错误预测权重（初始 2.0）
    - 移除 `detach()`，让梯度回传
-
 4. **超参数调整** — 与 CoCoOp 保持一致：
    - LR: 0.002
    - PREC: fp16
 
 ### 2026-03-28：训练稳定性修复
 
-| Bug | 原因 | 修复 |
-|-----|------|------|
+| Bug     | 原因                      | 修复                                          |
+| :------ | :---------------------- | :------------------------------------------ |
 | 权重范围无限制 | 困难权重可能达到 3-4 倍，对小样本冲击过大 | 添加 `weight = max(0.5, min(2.0, weight))` 限制 |
-| 学习率过高 | 0.002 对动态提示词参数过大 | 降为 0.001，后调整为 0.002 |
+| 学习率过高   | 0.002 对动态提示词参数过大        | 降为 0.001，后调整为 0.002                         |
 
 ### 2026-03-27：核心模块激活修复
 
-| Bug | 原因 | 修复 |
-|-----|------|------|
-| 难度权重从未计算 | `predictions` 始终为 None | 改为两阶段前向 |
-| `class_adaptive_factors` 未参与计算 | 未与 ctx 相乘 | 在 forward 中相乘 |
+| Bug                            | 原因                     | 修复            |
+| :----------------------------- | :--------------------- | :------------ |
+| 难度权重从未计算                       | `predictions` 始终为 None | 改为两阶段前向       |
+| `class_adaptive_factors` 未参与计算 | 未与 ctx 相乘              | 在 forward 中相乘 |
 
 ## 参考资料
 
@@ -321,3 +383,4 @@ python web/app.py --model ./output_fgd/model-best.pth.tar
 - [CoOp: Context Optimization](https://github.com/KaiyangZhou/CoOp)
 - [CoCoOp: Conditional Context Optimization](https://github.com/KaiyangZhou/CoOp)
 - [Oxford-IIIT Pets Dataset](https://www.robots.ox.ac.uk/~vgg/data/pets/)
+
