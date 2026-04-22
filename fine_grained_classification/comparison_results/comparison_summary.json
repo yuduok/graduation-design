@@ -1,0 +1,15 @@
+{
+  "dataset": "oxford_pets",
+  "backbone": "RN50",
+  "models": {
+    "Zero-shot CLIP": {
+      "accuracy": 0.7745979831016626,
+      "mean_confidence": 0.7509765625
+    },
+    "DynamicPrompt": {
+      "accuracy": 0.8421913327882257,
+      "mean_confidence": 0.8161741495132446
+    }
+  },
+  "best_model": "DynamicPrompt"
+}

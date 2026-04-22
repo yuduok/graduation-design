@@ -67,6 +67,7 @@ tar -xzf annotations.tar.gz
 ```
 fine_grained_classification/
 ├── train.py                     # 训练入口（支持 CoOp/CoCoOp/DynamicPromptTrainer）
+├── compare_models.py            # 模型对比评估脚本
 ├── evaluate.py                  # 评估脚本
 ├── collect_results.py           # 实验结果汇总与图表生成
 ├── run_experiments.sh           # 自动化批量实验脚本
@@ -106,11 +107,33 @@ python train.py -d oxford_pets -t DynamicPromptTrainer --shots 16 -e 60 --device
 bash run_experiments.sh                    # 默认: 100,90,80,70,50 epochs
 bash run_experiments.sh cuda 16 "100,90,80,70,50"  # 自定义 epochs 列表
 
+# 模型对比评估
+python compare_models.py --dataset oxford_pets --backbone RN50
+
+# 指定模型检查点路径（JSON 格式）
+python compare_models.py \
+    --dataset oxford_pets \
+    --backbone RN50 \
+    --model-dirs '{"coop": "output_fgd/oxford_pets/CoOp/shots_16/seed_1", "cocoop": "output_fgd/oxford_pets/CoCoOp/shots_16/seed_1", "dynamic": "output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/seed_1"}'
+
+# 只对比 CLIP 和 DynamicPrompt
+python compare_models.py --models clip dynamic --dataset oxford_pets
+
 # 收集结果
 python collect_results.py                   # 按 shot 对比
-python collect_results.py --epochs           # 按 epochs 对比（支持不同 epoch 设置的结果）
+python collect_results.py --epochs           # 按 epochs 对比
 python collect_results.py --latex --plot     # 生成 LaTeX 表格和图表
 ```
+
+**对比脚本功能**：
+- 准确率对比（整体准确率）
+- Top-K 准确率（Top-1, Top-3, Top-5）
+- 置信度分布分析（正确/错误预测的置信度对比）
+- 可视化图表输出：
+  - `accuracy_comparison.png` - 准确率柱状图对比
+  - `confidence_distribution.png` - 预测置信度分布对比
+  - `top_k_accuracies.png` - Top-K 准确率对比
+- `comparison_summary.json` - 结果汇总文件
 
 ### 启动演示
 
