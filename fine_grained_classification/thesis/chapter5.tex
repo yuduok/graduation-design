@@ -93,7 +93,40 @@ DynamicPromptTrainer & 86.0 & 85.9 & 89.5 & 89.2 & 89.8 \\
 \label{fig:line_chart}
 \end{figure}
 
-进一步观察本文方法与 CoCoOp 的差异可以发现,二者在 4-shot 以后都进入较高精度区间,差距保持在 1 个百分点以内。这表明本文方法并没有通过扩大模型规模来换取提升,而是在样本较少、类别边界尚未稳定时,通过更合理的样本加权获得了更快、更稳的收敛效果。
+进一步观察本文方法与 CoCoOp 的差异可以发现,二者在 4-shot 以后都进入较高精度区间,差距保持在 1 个百分点以内。也就是说,本文方法的收益主要出现在类别边界还不稳定的阶段,改进点更接近优化过程本身,而不是依赖额外模型规模。
+
+\subsection{补充对比图分析}
+
+除论文前面已经给出的主结果图外,项目中的 \texttt{comparison\_results} 目录还提供了三张补充图,分别从总体准确率、Top-$k$ 准确率和预测置信度三个角度对比 Zero-shot CLIP 与 DynamicPrompt。这里的 DynamicPrompt 对应本项目最终实现的动态提示分类模型,结果来自 \texttt{comparison\_summary.json}。
+
+图~\ref{fig:accuracy_comparison} 给出了两种方法在测试集上的总体准确率。Zero-shot CLIP 的准确率为 77.46\%,DynamicPrompt 提升到 84.22\%,增幅约为 6.76 个百分点。这个结果和前文 few-shot 主实验并不冲突。前面的实验重点是 CoOp、CoCoOp 与本文方法之间的比较,这张图则补充说明动态提示策略相对原始零样本 CLIP 也有稳定提升,提示学习确实改善了 Oxford-IIIT Pets 上的类别区分能力。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.76\textwidth]{accuracy_comparison.png}
+\caption{Zero-shot CLIP 与 DynamicPrompt 的总体准确率对比}
+\label{fig:accuracy_comparison}
+\end{figure}
+
+图~\ref{fig:topk_comparison} 展示了 Top-1、Top-3 和 Top-5 准确率。虽然图中没有单独给出数值表,但从柱状高度可以直接看出,DynamicPrompt 在三个指标上都高于 Zero-shot CLIP,其中 Top-1 的改善最明显。随着 $k$ 增大,两种方法的差距有所收敛,这说明不少错误样本并不是完全偏离正确类别,而是把正确标签排在了更靠后的位置。对细粒度宠物分类来说,这种情况并不少见,因为许多品种在毛色、脸型和耳部轮廓上的差别本来就很小。DynamicPrompt 的作用,正是把一部分“排在前几名但不是第一名”的预测继续往前推。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{top_k_accuracies.png}
+\caption{Zero-shot CLIP 与 DynamicPrompt 的 Top-$k$ 准确率对比}
+\label{fig:topk_comparison}
+\end{figure}
+
+图~\ref{fig:confidence_distribution} 比较了两种方法的预测置信度分布。\texttt{comparison\_summary.json} 中记录的平均置信度显示,Zero-shot CLIP 为 0.7510,DynamicPrompt 为 0.8162。结合直方图可以看出,DynamicPrompt 的分布整体向高置信区间右移,峰值更集中。这一变化说明模型不只是多分对了几张图,而是在更多样本上形成了更明确的判别输出。当然,置信度升高并不自动等于模型一定更可靠,但在本实验里,它至少和准确率提升保持了同向变化,因此可以作为主实验结论的补充证据。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{confidence_distribution.png}
+\caption{Zero-shot CLIP 与 DynamicPrompt 的预测置信度分布}
+\label{fig:confidence_distribution}
+\end{figure}
+
+把这三张图放在一起看,可以得到一个更完整的判断。动态提示方法带来的收益不仅体现在最终 Top-1 准确率上,也体现在候选类别排序和预测置信度上。对论文实验部分来说,这组补充图的价值在于把“准确率更高”拆成几个更细的观察角度,让结论不再只依赖单一指标。
 
 \subsection{自适应 epoch 策略分析}
 
@@ -110,7 +143,7 @@ DynamicPromptTrainer & 86.0 & 85.9 & 89.5 & 89.2 & 89.8 \\
 
 \subsection{与 CoCoOp 的针对性比较}
 
-为了更直观地展示本文方法相对 CoCoOp 的变化,图~\ref{fig:vs_cocoop} 给出了两者在各 shot 设置下的精度差值。可以看到,增益主要集中在 2-shot 到 8-shot 区间,其中 2-shot 的提升最大。这一现象与本文方法的设计目标是一致的: 当样本不足以支撑稳定类别边界时,困难样本权重机制能够帮助模型减少对易分类样本的过度更新,从而把更多训练信号留给边界样本和易混淆样本。
+为了更直观地展示本文方法相对 CoCoOp 的变化,图~\ref{fig:vs_cocoop} 给出了两者在各 shot 设置下的精度差值。可以看到,增益主要集中在 2-shot 到 8-shot 区间,其中 2-shot 的提升最大。这和本文方法的设计目标基本一致: 当样本不足以支撑稳定类别边界时,困难样本权重机制会减少易分类样本对参数更新的主导作用,把更多训练信号留给边界样本和易混淆样本。
 
 \begin{figure}[H]
 \centering
@@ -123,4 +156,4 @@ DynamicPromptTrainer & 86.0 & 85.9 & 89.5 & 89.2 & 89.8 \\
 
 \section{本章小结}
 
-本章给出了本文方法在 Oxford-IIIT Pets 数据集上的实验设置与结果分析。实验表明,DynamicPromptTrainer 在 2-shot、4-shot、8-shot 和 16-shot 四种设置下均优于 CoCoOp,最高准确率达到 89.8\%。结合图表分析可以看出,本文方法的优势主要体现在小样本到中等样本区间,说明图像条件提示与难度感知加权的结合能够改善 CLIP 在细粒度少样本分类中的训练效果。
+本章给出了本文方法在 Oxford-IIIT Pets 数据集上的实验设置与结果分析。主实验表明,DynamicPromptTrainer 在 2-shot、4-shot、8-shot 和 16-shot 四种设置下均优于 CoCoOp,最高准确率达到 89.8\%。补充对比图说明,相对原始 Zero-shot CLIP,动态提示模型不仅提高了总体准确率,还改善了 Top-$k$ 排序结果和平均预测置信度。综合来看,本文方法的优势主要出现在小样本到中等样本区间,说明图像条件提示与难度感知加权的结合对细粒度少样本分类是有效的。
