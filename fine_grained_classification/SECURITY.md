@@ -72,14 +72,10 @@ python fine_grained_classification/evaluate_security_ttc.py \
   --shots 1 \
   --seed 1 \
   --device cuda \
-  --epsilon 1.0/255.0 \
-  --alpha 1.0/255.0 \
-  --num-steps 10 \
-  --ttc-eps 4.0/255.0 \
-  --ttc-stepsize 1.0/255.0 \
+  --ttc-eps 0.011764705882352941 \
   --ttc-numsteps 2 \
-  --tau-thres 0.2 \
-  --beta 2.0
+  --tau-thres 0.6 \
+  --beta 1.0
 ```
 
 如果不显式指定 `--model-path`，脚本会自动在以下目录寻找 checkpoint：
