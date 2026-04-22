@@ -1,9 +1,9 @@
 # 细粒度猫狗分类系统 - 项目状态报告
 
-**项目名称**: 基于提示词优化的细粒度猫狗分类系统
+**项目名称**: 基于动态提示词优化的细粒度猫狗分类系统
 **技术栈**: PyTorch 2.4.1 + CLIP (RN50) + Python 3.8+
 **数据集**: Oxford-IIIT Pets (7,390 张图片, 37 种猫狗品种)
-**更新时间**: 2026-04-02
+**更新时间**: 2026-04-23
 
 ---
 
@@ -54,22 +54,47 @@ DifficultyWeightCalculator(可学习温度) → 难度权重 w_i
 ```
 fine_grained_classification/
 ├── train.py                     # 训练入口（支持 CoOp/CoCoOp/DynamicPromptTrainer）
+├── compare_models.py            # 模型对比评估脚本
 ├── evaluate.py                  # 评估脚本
 ├── collect_results.py           # 实验结果汇总与图表生成
 ├── run_experiments.sh           # 自动化批量实验脚本
+├── requirements.txt             # Python 依赖
 ├── configs/
-│   └── dynamic_rn50.yaml        # 训练超参配置
+│   ├── dynamic_rn50.yaml        # RN50 训练超参配置
+│   └── dynamic_vitb16.yaml      # ViT-B/16 训练超参配置
 ├── models/
+│   ├── __init__.py              # 模型模块导出
 │   ├── custom_clip.py           # 自定义 CLIP（整合动态提示 + 语义增强）
 │   ├── dynamic_prompt.py        # AdaptivePromptLearner + SoftPromptAdapter + DifficultyWeightCalculator
 │   ├── trainer.py               # DynamicPromptTrainer（注册到 Dassl）
-│   └── breed_semantic.py        # 品种属性库（37 品种的毛发/面部/体型特征）
+│   ├── breed_semantic.py        # 品种属性库（37 品种的毛发/面部/体型特征）
+│   ├── adversarial_defense.py   # 对抗性防御模块（TTC 风格）
+│   └── robust_custom_clip.py    # 鲁棒 CLIP 模型
 ├── demo/
-│   └── pet_classifier_demo.py   # Streamlit 交互演示
+│   └── pet_classifier_demo.py   # Streamlit 交互演示（研究增强版）
 ├── web/
-│   └── app.py                   # Flask REST API 服务
-└── utils/
-    └── helpers.py               # 可视化与度量工具
+│   ├── app.py                   # Flask REST API 服务（研究增强版）
+│   └── static/
+│       └── index.html           # 前端 HTML 演示页面
+├── utils/
+│   └── helpers.py               # 可视化与度量工具
+├── output_fgd/                  # 实验输出目录
+│   └── oxford_pets/
+│       ├── CoOp/                # CoOp 实验结果（shots_1/2/4/8/16）
+│       ├── CoCoOp/              # CoCoOp 实验结果（shots_1/2/4/8/16）
+│       ├── DynamicPromptTrainer/ # DynamicPrompt 实验结果（shots_1/2/4/8/16）
+│       └── experiment_summary.json # 实验结果摘要
+├── comparison_results/          # 模型对比结果
+│   ├── accuracy_comparison.png
+│   ├── confidence_distribution.png
+│   ├── top_k_accuracies.png
+│   └── comparison_summary.json
+├── security_results/            # 对抗防御实验结果
+├── thesis/                      # 毕业论文 LaTeX 源文件
+│   ├── main.tex
+│   ├── chapters/
+│   └── thesis_figures/
+└── thesis_figures/              # 论文图表
 ```
 
 ---
@@ -168,20 +193,49 @@ bash run_experiments.sh cuda
 
 ### 启动演示
 
+#### Flask API 服务（推荐）
+
+```bash
+cd web
+
+# 使用训练好的模型启动（动态提示词推理模式）
+python app.py --shot 16 --port 5001
+
+# 或指定具体模型路径
+python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/seed_1/prompt_learner/model.pth.tar-20 --port 5001
+
+# Zero-shot 模式（不加载训练模型）
+python app.py --port 5001
+```
+
+**API 端点**：
+| 端点 | 方法 | 功能 |
+|------|------|------|
+| `/` | GET | 前端 HTML 演示页面 |
+| `/api/classify` | POST | 单图分类（支持对比模式） |
+| `/api/compare` | POST | 多模型对比（DynamicPrompt vs Zero-shot） |
+| `/api/breeds` | GET | 获取所有品种列表 |
+| `/api/breed/<name>` | GET | 获取品种详情（属性/提示词模板） |
+| `/api/experiments` | GET | 获取实验结果摘要 |
+| `/api/model-info` | GET | 获取当前模型信息 |
+| `/api/health` | GET | 健康检查 |
+
+#### Streamlit 交互演示
+
 ```bash
 # Streamlit 界面 → http://localhost:8501
 streamlit run demo/pet_classifier_demo.py
-
-# Flask API → http://localhost:5001（zero-shot 模式）
-cd web && python app.py
-
-# 使用训练模型启动 API（动态提示词推理模式）
-python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/seed_1/prompt_learner/model-best.pth.tar
 ```
+
+功能标签页：
+- **🔍 分类演示** - 上传图片，选择提示词模式，对比 Zero-shot
+- **📊 研究结果** - 实验数据表格、方法对比、自适应 Epoch 策略
+- **📚 品种知识库** - 37 种猫狗品种属性浏览（毛发/面部/体型/性格）
+- **🔌 API 文档** - 完整接口说明
 
 > 加载训练模型后，Web API 自动切换为**动态提示词推理模式**，通过 `SoftPromptAdapter` 生成图像条件化的提示词。
 > API 响应中 `mode` 字段标明当前推理模式：`"dynamic_prompt"` 或 `"zero_shot"`。
-> CUDA 训练的模型可直接在 Mac CPU 上使用，PyTorch 通过 `map_location` 自动映射设备。
+> CUDA 训练的模型可直接在 Mac CPU/MPS 上使用，PyTorch 通过 `map_location` 自动映射设备。
 
 ---
 
@@ -191,7 +245,7 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/se
 
 - [x] 核心模型模块（dynamic_prompt / custom_clip / trainer / breed_semantic）
 - [x] 训练流程（train.py 支持 3 种 trainer + few-shot 配置）
-- [x] Web 演示（Streamlit + Flask API）
+- [x] Web 演示（Streamlit + Flask API + 前端 HTML 页面）
 - [x] 所有单元测试通过（test_core / test_demo / test_full）
 - [x] Bug 修复：logit_scale 缺失、类名错误（36→37 类）、导入路径等
 - [x] 云端部署支持：替换完整版 Dassl、修复 ftfy 版本、路径自动查找
@@ -204,10 +258,15 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/se
 - [x] **自适应 Epoch 策略训练完成**（1-shot=100ep, 2-shot=80ep, 4-shot=60ep, 8-shot=40ep, 16-shot=20ep）
 - [x] **所有对比实验完成**（DynamicPromptTrainer / CoOp / CoCoOp，全部 5 种 shot 配置）
 - [x] **实验结果分析完成**（DynamicPromptTrainer 在 2/4/8/16-shot 上全面超越 CoCoOp）
+- [x] **Web API 研究增强版完成** - 新增多模型对比、品种语义信息、实验结果展示、调试信息
+- [x] **前端 HTML 页面完成** - 交互式分类、品种知识库、实验结果看板
+- [x] **Streamlit Demo 研究增强版完成** - 四标签页：分类演示/研究结果/品种知识库/API文档
 
 ### 待完成
 
 - [ ] 撰写论文实验章节
+- [ ] 对抗防御实验完整评估
+- [ ] ViT-B/16 骨干网络实验
 
 ---
 
@@ -252,6 +311,15 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/se
 ---
 
 ## 八、已修复 Bug 记录
+
+### 2026-04-23：Web 界面和 API 研究增强版
+
+**新增功能**：
+1. **Flask API 增强** - 新增 `/api/compare`、`/api/breeds`、`/api/breed/<name>`、`/api/experiments`、`/api/model-info` 端点
+2. **前端 HTML 页面** - 交互式分类、品种知识库、实验结果看板、API 文档
+3. **Streamlit Demo 增强** - 四标签页：分类演示/研究结果/品种知识库/API文档
+4. **品种语义信息** - API 返回品种属性（毛发/面部/体型/性格）
+5. **动态提示词调试信息** - 返回 ctx_norm、bias_norm、class_adaptive_factors 等
 
 ### 2026-04-13：自适应 Epoch 策略 + 实验完成
 
@@ -325,3 +393,4 @@ python app.py --model ../output_fgd/oxford_pets/DynamicPromptTrainer/shots_16/se
 4. **品种语义增强** — 37 品种属性库（毛发/面部/体型/性格），支持多模板文本生成
 5. **动态提示词推理** — Web 端加载训练模型后自动切换为动态推理模式
 6. **跨设备兼容** — CUDA 训练的模型可在 Mac CPU/MPS 上无缝使用
+7. **研究增强版 Web 界面** — 多模型对比、品种语义信息、实验结果展示、调试信息可视化
