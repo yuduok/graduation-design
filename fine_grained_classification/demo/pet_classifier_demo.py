@@ -309,7 +309,7 @@ def main():
                         padding: 20px;
                         margin-bottom: 20px;">
                 <h4 style="color: #667eea; margin-bottom: 10px;">🤖 动态提示词模式</h4>
-                <p>本系统使用 <strong>AdaptivePromptLearner</strong> 自动生成图片专属的动态提示词，无需手动输入。</p>
+                <p>本系统使用自动生成图片专属的动态提示词，无需手动输入。</p>
                 <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
                 提示词会根据图片内容自动调整，每张图片的提示词都是独特的。</p>
             </div>
