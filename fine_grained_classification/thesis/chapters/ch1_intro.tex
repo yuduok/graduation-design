@@ -21,7 +21,7 @@
 本文的主要贡献如下：
 
 \begin{enumerate}
-\item 提出了DynamicPromptTrainer方法，通过自适应提示词学习器（AdaptivePromptLearner）和软提示适配器（SoftPromptAdapter）实现图像条件化的提示词生成；
-\item 设计了可学习的难度权重计算器（DifficultyWeightCalculator），使模型能够自动学习对不同难度样本的加权策略；
+\item 在 CoCoOp 图像条件提示框架基础上实现了难样本加权扩展，并在项目中以 DynamicPromptTrainer 训练器形式组织；
+\item 设计了可学习的难度权重计算器，使模型能够自动学习对不同难度样本的加权策略；
 \item 在Oxford-IIIT Pets数据集上的实验表明，本文方法在多数few-shot设置下优于CoOp和CoCoOp基线方法。
 \end{enumerate}

@@ -12,14 +12,14 @@
 
 \section{整体架构}
 
-围绕上述目标,本文设计并实现了 DynamicPromptTrainer。系统仍以 CLIP 为主干,视觉编码器和文本编码器保持冻结,训练阶段只更新提示学习相关模块。这样做的原因很直接: Oxford-IIIT Pets 的 few-shot 训练样本有限,如果直接微调整个主干,参数量过大,训练稳定性也更难控制。把更新范围限制在提示部分,既能保留 CLIP 的跨模态表示能力,也便于和 CoOp、CoCoOp 做对比。
+围绕上述目标,本文在 CoCoOp 图像条件提示框架基础上实现了一个难样本加权扩展,并在项目中以 DynamicPromptTrainer 训练器形式组织。系统仍以 CLIP 为主干,视觉编码器和文本编码器保持冻结,训练阶段只更新提示学习相关模块。这样做的原因很直接: Oxford-IIIT Pets 的 few-shot 训练样本有限,如果直接微调整个主干,参数量过大,训练稳定性也更难控制。把更新范围限制在提示部分,既能保留 CLIP 的跨模态表示能力,也便于和 CoOp、CoCoOp 做对比。
 
 系统整体流程如图 \ref{fig:dynamic_prompt_architecture} 所示。输入图像先经过视觉编码器得到图像特征,随后由提示学习模块生成与当前样本相关的文本提示,最后通过图文相似度计算得到分类结果。训练阶段再根据模型当前的预测状态生成样本权重,用加权交叉熵完成参数更新。
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.98\textwidth]{Chinese-English-architecture.png}
-\caption{DynamicPromptTrainer 系统架构}
+\includegraphics[width=0.98\textwidth]{cocoop_hard_sample_architecture.png}
+\caption{当前系统的整体架构图}
 \label{fig:dynamic_prompt_architecture}
 \end{figure}
 
@@ -30,21 +30,21 @@
 \begin{enumerate}
 \item 输入图像先经过冻结的 CLIP 视觉编码器,提取视觉特征;
 \item 基础可学习上下文向量与类别名称拼接,构成文本提示的主体;
-\item SoftPromptAdapter 根据当前图像特征生成一个提示偏移量,用于实现图像条件化提示;
+\item 图像条件提示偏移分支根据当前图像特征生成一个提示偏移量,用于实现图像条件化提示;
 \item 类别自适应因子对基础上下文进行逐元素缩放,使不同类别拥有不同的上下文调节方式;
 \item 文本编码器将生成后的提示词编码为文本特征,并与视觉特征计算相似度,得到分类 logits;
-\item DifficultyWeightCalculator 根据模型对真实类别的预测概率和误分类情况生成样本权重,用于计算加权交叉熵损失。
+\item 难度权重计算器根据模型对真实类别的预测概率和误分类情况生成样本权重,用于计算加权交叉熵损失。
 \end{enumerate}
 
 从结构上看,本文方法并没有改动 CLIP 主干,而是把改进集中在提示生成和损失加权两个环节。这样做有两个实际好处: 一是参数量较小,更适合少样本训练; 二是能够较直接地与 CoOp、CoCoOp 进行公平比较。
 
 \section{核心模块设计}
 
-\subsection{AdaptivePromptLearner}
+\subsection{基础提示上下文与类别缩放}
 
-AdaptivePromptLearner 是提示学习部分的入口,对应项目中的 \texttt{models/dynamic\_prompt.py}。该模块先初始化一组可学习上下文向量 \(\mathbf{c}_1,\mathbf{c}_2,\ldots,\mathbf{c}_{n_{ctx}}\)。初始化模板采用 ``a photo of a'',在当前实现中实际对应 4 个上下文 token。这样做并不追求把模板写得多复杂,而是先给提示一个稳定起点,后续再通过训练去调整。
+提示学习部分首先从一组可学习上下文向量开始,对应项目中的 \texttt{models/dynamic\_prompt.py}。该部分先初始化一组上下文向量 \(\mathbf{c}_1,\mathbf{c}_2,\ldots,\mathbf{c}_{n_{ctx}}\)。初始化模板采用 ``a photo of a'',在当前实现中实际对应 4 个上下文 token。这样做并不追求把模板写得多复杂,而是先给提示一个稳定起点,后续再通过训练去调整。
 
-与 CoOp 只维护一组共享上下文不同,本文在基础上下文之外加入类别自适应因子 \(\boldsymbol{\alpha}\)。对于第 \(i\) 个上下文向量,其类别相关表示写为
+这一部分本质上延续了 CoOp/CoCoOp 中“学习文本上下文”的基本思路,不把它作为本文的主要创新点。本文在共享上下文之外增加了类别自适应因子 \(\boldsymbol{\alpha}\),用于对基础上下文做轻量缩放。对于第 \(i\) 个上下文向量,其类别相关表示写为
 \begin{equation}
 \mathbf{c}'_{i} = \mathbf{c}_{i} \odot \boldsymbol{\alpha},
 \end{equation}
@@ -52,9 +52,9 @@ AdaptivePromptLearner 是提示学习部分的入口,对应项目中的 \texttt{
 
 这一设计比较适合本文任务。宠物品种名称已经提供了明确的类别语义,如果再让每一类完全独立地学习整套提示参数,在 1-shot 或 2-shot 场景下很容易出现训练不稳。采用共享上下文加轻量缩放,参数量较小,也更符合 few-shot 设置下的数据条件。
 
-\subsection{SoftPromptAdapter}
+\subsection{图像条件提示偏移}
 
-如果只有 AdaptivePromptLearner,系统虽然能学习上下文,但同一类别的不同图像仍然共享近似相同的提示表达。为了解决这个问题,本文加入 SoftPromptAdapter。该模块是一个两层 MLP,输入为视觉编码器输出的图像特征 \(\mathbf{f}_v \in \mathbb{R}^{d}\),输出为与上下文维度一致的偏移向量 \(\Delta \mathbf{c}\)。其计算形式为
+如果只有基础可学习上下文,系统虽然能学习提示,但同一类别的不同图像仍然共享近似相同的提示表达。为了解决这个问题,本文保留了与 CoCoOp 同类的图像条件提示机制。具体做法是使用一个两层 MLP,输入为视觉编码器输出的图像特征 \(\mathbf{f}_v \in \mathbb{R}^{d}\),输出为与上下文维度一致的偏移向量 \(\Delta \mathbf{c}\)。其计算形式为
 \begin{equation}
 \Delta \mathbf{c} = \mathbf{W}_2 \, \mathrm{ReLU}(\mathbf{W}_1 \mathbf{f}_v).
 \end{equation}
@@ -64,11 +64,11 @@ AdaptivePromptLearner 是提示学习部分的入口,对应项目中的 \texttt{
 \mathbf{c}^{*}_{i} = \mathbf{c}'_{i} + \Delta \mathbf{c}.
 \end{equation}
 
-这一模块和 CoCoOp 的基本思路接近,都是让提示跟着图像走,而不是保持静态。不同之处在于,本文没有把问题停留在“提示如何变化”上,还进一步关心“训练时哪些样本更需要被强调”。因此 SoftPromptAdapter 负责输入适配,而样本难度判断交给后面的 DifficultyWeightCalculator。
+需要说明的是,这一部分的作用主要是为本文后续的难样本加权提供一个稳定的图像条件提示基础,而不是单独宣称提出了新的提示结构。本文真正希望强调的改动不在于“再命名一个提示模块”,而在于在此基础上把样本难度信息引入损失计算。因此,前两部分负责完成提示生成,而样本难度判断交给后面的难度权重计算器。
 
-\subsection{DifficultyWeightCalculator}
+\subsection{难度权重计算器}
 
-DifficultyWeightCalculator 用于为每个训练样本生成权重。这里没有直接把损失值当成难度,而是根据模型对真实类别的预测概率以及预测是否正确来估计样本难度。这样做更贴近训练过程本身,因为模型真正“拿不准”的样本,通常就体现在真实类别概率偏低或直接分错上。
+难度权重计算器用于为每个训练样本生成权重。这里没有直接把损失值当成难度,而是根据模型对真实类别的预测概率以及预测是否正确来估计样本难度。这样做更贴近训练过程本身,因为模型真正“拿不准”的样本,通常就体现在真实类别概率偏低或直接分错上。
 
 设模型输出 logits 为 \(\mathbf{z}_i\),其 softmax 概率为 \(\mathbf{p}_i\),真实标签为 \(y_i\)。首先取真实类别概率
 \begin{equation}
@@ -87,9 +87,9 @@ w_i^{(base)} = 1 + \sigma\left(\frac{s \cdot u_i}{\tau + \varepsilon}\right),
 
 此外,若样本被错误分类,本文还会叠加额外的错误样本权重。设预测类别为 \(\hat{y}_i\),则最终权重为
 \begin{equation}
-w_i = \mathrm{clip}\left(w_i^{(base)} + \mathbb{I}(\hat{y}_i \neq y_i)\cdot(\lambda - 1), 1, 3 \right),
+w_i = \min \left( 3,\max \left( 1,\, w_i^{(base)} + \mathbb{I}(\hat{y}_i \neq y_i)\cdot(\lambda - 1) \right) \right),
 \end{equation}
-其中 \(\lambda\) 为可学习错误样本权重参数,\(\mathbb{I}(\cdot)\) 为示性函数。权重最终限制在 \([1,3]\) 区间内,以保证训练稳定性。
+其中 \(\lambda\) 为可学习错误样本权重参数,\(\mathbb{I}(\cdot)\) 为示性函数。这里通过上下界截断将权重限制在 \([1,3]\) 区间内,以保证训练稳定性。
 
 这一模块的作用有两点。其一,它不需要事先手工规定哪些样本是困难样本,而是根据当前预测结果动态估计。其二,温度和缩放参数本身可以学习,因此模型会在训练过程中逐步调整自己对难样本的敏感程度,而不是固定采用一个人工设定的权重规则。
 
@@ -101,7 +101,7 @@ w_i = \mathrm{clip}\left(w_i^{(base)} + \mathbb{I}(\hat{y}_i \neq y_i)\cdot(\lam
 
 第一阶段使用当前提示词生成初始 logits,主要目的是获得模型对每个样本的预测概率和预测类别。该阶段提供的不是最终损失,而是难度估计所需的信息。
 
-第二阶段在得到样本权重后,再结合 AdaptivePromptLearner 和 SoftPromptAdapter 生成最终提示表示,计算分类 logits 和加权交叉熵损失。设标准交叉熵损失为 \(\ell_{CE}(\mathbf{z}_i, y_i)\),则批次损失为
+第二阶段在得到样本权重后,再结合基础提示上下文、类别缩放和图像条件提示偏移生成最终提示表示,计算分类 logits 和加权交叉熵损失。设标准交叉熵损失为 \(\ell_{CE}(\mathbf{z}_i, y_i)\),则批次损失为
 \begin{equation}
 \mathcal{L} = \frac{1}{N}\sum_{i=1}^{N} w_i \cdot \ell_{CE}(\mathbf{z}_i, y_i).
 \end{equation}
@@ -115,22 +115,22 @@ w_i = \mathrm{clip}\left(w_i^{(base)} + \mathbb{I}(\hat{y}_i \neq y_i)\cdot(\lam
 \begin{enumerate}
 \item 基础上下文向量 \texttt{ctx};
 \item 类别自适应因子 \texttt{class\_adaptive\_factors};
-\item SoftPromptAdapter 中的两层线性映射参数;
-\item DifficultyWeightCalculator 中的温度、缩放和错误样本权重参数。
+\item 图像条件提示偏移分支中的两层线性映射参数;
+\item 难度权重计算器中的温度、缩放和错误样本权重参数。
 \end{enumerate}
 
-这种参数更新范围明显小于对整个 CLIP 进行微调,更适合 few-shot 场景。实验中优化器采用 SGD,初始学习率为 0.002,并配合余弦退火策略更新学习率。训练精度采用 fp16,这样可以减少显存占用,也让不同 shot 配置的实验更容易在同一套环境中完成。
+这种参数更新范围明显小于对整个 CLIP 进行微调,更适合 few-shot 场景,也与近年参数高效适配研究强调“冻结主干、只更新少量参数”的思路一致\cite{xu2023fewshotvit}。实验中优化器采用 SGD,初始学习率为 0.002,并配合余弦退火策略更新学习率。训练精度采用 fp16,这样可以减少显存占用,也让不同 shot 配置的实验更容易在同一套环境中完成。
 
 这里还有一个实现层面的考虑。本文最终采用了与 shot 数匹配的 epoch 设置,例如 1-shot 训练轮数更长,16-shot 训练轮数更短。这样做不是为了刻意调高结果,而是因为少样本和相对充足样本在收敛速度上本来就不同。如果所有设置都训练相同 epoch,低 shot 配置容易学不够,高 shot 配置又可能过拟合,最后比较反而不公平。
 
 \section{设计特点分析}
 
-与 CoOp 相比,本文方法最大的区别在于提示不再是静态共享的。即便属于同一类别,不同图像经过 SoftPromptAdapter 后也会产生不同的上下文偏移。与 CoCoOp 相比,本文又向前多走了一步: 不只是让提示随着图像变化,还让损失随着样本难度变化。
+与 CoOp 相比,本文方法最大的区别在于提示不再是静态共享的。即便属于同一类别,不同图像经过图像条件提示偏移后也会产生不同的上下文表示。与 CoCoOp 相比,本文真正新增的部分不是重新命名前端提示结构,而是在此基础上进一步引入样本难度感知加权,让损失随着样本难度变化。
 
-从优化角度看,这一设计更符合细粒度分类的实际情况。细粒度任务的瓶颈往往不是“模型完全看不懂样本”,而是“模型在一部分相近类别上总是容易犹豫”。如果训练时把这部分样本和大量简单样本同等对待,更新方向会被平均化。引入 DifficultyWeightCalculator 后,模型更倾向于把参数更新集中在置信度低和预测错误的样本上,从而增强对边界样本的判别能力。
+从优化角度看,这一设计更符合细粒度分类的实际情况。细粒度任务的瓶颈往往不是“模型完全看不懂样本”,而是“模型在一部分相近类别上总是容易犹豫”。如果训练时把这部分样本和大量简单样本同等对待,更新方向会被平均化。引入难度权重计算器后,模型更倾向于把参数更新集中在置信度低和预测错误的样本上,从而增强对边界样本的判别能力。
 
 同时,本文没有引入过于复杂的附加分支,也没有对 CLIP 主干做大规模改动,整体实现仍然保持了较好的可复现性。这一点对于本科毕业设计尤其重要: 方法需要有一定改进空间,但也必须保证实现过程清晰、实验结果可核对。
 
 \section{本章小结}
 
-本章围绕 DynamicPromptTrainer 的系统设计进行了说明。本文方法以 CLIP 为基础,通过 AdaptivePromptLearner、SoftPromptAdapter 和 DifficultyWeightCalculator 三个模块实现了提示词的动态生成与样本难度感知训练。整体设计既保留了提示学习在少样本场景下参数量小、迁移方便的优点,又针对细粒度分类任务中常见的困难样本问题做了专门处理,为后续实验结果提供了方法基础。
+本章围绕本文基于 CoCoOp 的难样本加权扩展进行了说明。整体上,本文沿用了提示学习中的基础可学习上下文和图像条件提示思路,并在此基础上加入难度权重计算器,把样本难度感知加权引入训练过程。这样的写法更符合本文方法的真实结构: 提示生成部分主要继承 CoCoOp 框架,主要方法增量集中在困难样本建模与损失加权上,为后续实验结果提供了方法基础。

@@ -4,7 +4,7 @@
 
 \subsection{实验环境}
 
-本文实验在 CLIP 框架上完成,训练入口为项目中的 \texttt{train.py},核心训练器为 \texttt{DynamicPromptTrainer}。模型实现基于 PyTorch,并沿用 Dassl 框架组织数据集、优化器和训练流程。按照项目配置,实验主干网络采用 CLIP RN50,图像编码器与文本编码器参数在训练阶段保持冻结,仅更新提示学习相关模块参数。
+本文实验在 CLIP 框架上完成,训练入口为项目中的 \texttt{train.py},核心训练器命名为 \texttt{DynamicPromptTrainer}。从方法定位上看,其本质是一个基于 CoCoOp 的难样本加权扩展实现。模型实现基于 PyTorch,并沿用 Dassl 框架组织数据集、优化器和训练流程。按照项目配置,实验主干网络采用 CLIP RN50,图像编码器与文本编码器参数在训练阶段保持冻结,仅更新提示学习相关模块参数。
 
 优化器选用 SGD,基础学习率设置为 0.002,学习率调度采用带 warmup 的余弦退火策略。为了降低显存占用并与 CoCoOp 的实现设置保持一致,训练精度使用 fp16。上述配置均可在项目的 \texttt{configs/dynamic\_rn50.yaml} 与 \texttt{train.py} 中核对。
 
@@ -23,7 +23,7 @@
 \begin{enumerate}
 \item CoOp。使用静态可学习上下文向量替代人工提示词,属于提示学习基线方法。
 \item CoCoOp。在 CoOp 的基础上增加图像条件化提示生成模块,能够根据输入图像动态调整提示。
-\item DynamicPromptTrainer。本文实现的方法,在图像条件提示的基础上进一步加入类别自适应因子和难度感知样本加权机制。
+\item DynamicPromptTrainer。本文实现的基于 CoCoOp 的扩展方法,在图像条件提示的基础上进一步加入类别自适应因子和难度感知样本加权机制。
 \end{enumerate}
 
 因此,本章实验不再引入 Zero-shot CLIP 作为对比项,也不在表格中写入未在当前项目结果文件中正式参与比较的基线。
@@ -36,7 +36,7 @@
 
 \subsection{网络与提示配置}
 
-在本文实现中,基础提示词由 \texttt{a photo of a} 初始化得到,对应 4 个可学习上下文 token。SoftPromptAdapter 采用两层 MLP 结构,维度为 512$\rightarrow$32$\rightarrow$512,其中隐藏层宽度按视觉特征维度的 $\frac{1}{16}$ 设置。DifficultyWeightCalculator 中包含可学习的温度参数、置信度缩放参数和错误样本附加权重,训练时通过反向传播自动调整。
+在本文实现中,基础提示词由 \texttt{a photo of a} 初始化得到,对应 4 个可学习上下文 token。图像条件提示偏移分支采用两层 MLP 结构,维度为 512$\rightarrow$32$\rightarrow$512,其中隐藏层宽度按视觉特征维度的 $\frac{1}{16}$ 设置。难度权重计算器中包含可学习的温度参数、置信度缩放参数和错误样本附加权重,训练时通过反向传播自动调整。
 
 从实现方式看,本文方法并不是简单地把一个额外损失项叠加到 CoCoOp 上,而是在提示生成与损失加权两个位置同时加入动态机制。前者负责根据图像特征生成偏移提示,后者负责根据预测难度重新分配样本贡献,两者共同影响最终的参数更新方向。
 
@@ -148,7 +148,7 @@ DynamicPromptTrainer & 86.0 & 85.9 & 89.5 & 89.2 & 89.8 \\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.68\textwidth]{comparison_vs_cocoop.png}
-\caption{DynamicPromptTrainer 相对 CoCoOp 的准确率变化}
+\caption{本文 CoCoOp 扩展方法相对 CoCoOp 的准确率变化}
 \label{fig:vs_cocoop}
 \end{figure}
 
@@ -156,4 +156,4 @@ DynamicPromptTrainer & 86.0 & 85.9 & 89.5 & 89.2 & 89.8 \\
 
 \section{本章小结}
 
-本章给出了本文方法在 Oxford-IIIT Pets 数据集上的实验设置与结果分析。主实验表明,DynamicPromptTrainer 在 2-shot、4-shot、8-shot 和 16-shot 四种设置下均优于 CoCoOp,最高准确率达到 89.8\%。补充对比图说明,相对原始 Zero-shot CLIP,动态提示模型不仅提高了总体准确率,还改善了 Top-$k$ 排序结果和平均预测置信度。综合来看,本文方法的优势主要出现在小样本到中等样本区间,说明图像条件提示与难度感知加权的结合对细粒度少样本分类是有效的。
+本章给出了本文方法在 Oxford-IIIT Pets 数据集上的实验设置与结果分析。主实验表明,本文基于 CoCoOp 的难样本加权扩展在 2-shot、4-shot、8-shot 和 16-shot 四种设置下均优于 CoCoOp,最高准确率达到 89.8\%。补充对比图说明,相对原始 Zero-shot CLIP,该扩展方法不仅提高了总体准确率,还改善了 Top-$k$ 排序结果和平均预测置信度。综合来看,本文方法的优势主要出现在小样本到中等样本区间,说明图像条件提示与难度感知加权的结合对细粒度少样本分类是有效的。

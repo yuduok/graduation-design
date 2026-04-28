@@ -4,7 +4,7 @@
 
 视觉语言预训练模型 CLIP 为小样本图像分类提供了新的实现路径。它可以利用图像与文本的对齐能力完成零样本或少样本识别,但分类效果仍然明显依赖提示词设计。已有的 CoOp 通过学习上下文向量替代人工提示词,改善了下游任务适配能力; CoCoOp 进一步引入图像条件化提示,提高了不同样本之间的适应性。不过,这两类方法都没有直接区分易分类样本和难分类样本,训练时仍采用统一的损失权重。
 
-针对上述问题,本文提出一种面向细粒度猫狗分类的动态提示词优化方法 DynamicPromptTrainer。该方法以 CLIP 为基础,在提示学习框架中加入三个关键部件: 一是 AdaptivePromptLearner,在基础上下文向量外叠加类别自适应因子; 二是 SoftPromptAdapter,利用两层 MLP 根据图像特征生成提示词偏移; 三是 DifficultyWeightCalculator,根据模型对真实类别的预测置信度和错误情况生成可学习的样本权重,使训练过程对困难样本给予更高关注。与此同时,本文采用随 shot 数变化的自适应训练轮数策略,以缓解低样本条件下训练不足和高样本条件下过拟合的问题。
+针对上述问题,本文提出一种基于 CoCoOp 的难样本加权扩展方法,并在项目中以 DynamicPromptTrainer 训练器形式实现。该方法以 CLIP 为基础,沿用可学习上下文和图像条件提示机制生成动态提示,并进一步引入难度权重计算器,根据模型对真实类别的预测置信度和错误情况生成可学习的样本权重,使训练过程对困难样本给予更高关注。与此同时,本文采用随 shot 数变化的自适应训练轮数策略,以缓解低样本条件下训练不足和高样本条件下过拟合的问题。
 
 本文在 Oxford-IIIT Pets 数据集上完成了 1-shot、2-shot、4-shot、8-shot 和 16-shot 五组实验。结果表明,所提方法在 2-shot、4-shot、8-shot 和 16-shot 设置下均优于 CoCoOp,对应准确率分别达到 85.9\%、89.5\%、89.2\% 和 89.8\%; 其中 16-shot 设置下取得全实验最高准确率 89.8\%。实验结果说明,将图像条件提示与难度感知加权结合起来,能够更稳定地提升 CLIP 在细粒度少样本分类任务中的表现。
 
@@ -18,7 +18,7 @@ Fine-grained image classification aims to distinguish subcategories within the s
 
 CLIP provides a practical foundation for this setting because it aligns image and text representations in a shared space. Yet its performance is still sensitive to prompt design. CoOp improves task adaptation by replacing handcrafted context words with learnable vectors, and CoCoOp further introduces image-conditional prompts. However, these methods do not explicitly distinguish easy samples from hard ones during training, and all samples still contribute to the loss in a similar manner.
 
-This thesis proposes a dynamic prompt optimization method for fine-grained cat and dog classification, named DynamicPromptTrainer. Built on CLIP, the method combines three components: AdaptivePromptLearner for class-adaptive context scaling, SoftPromptAdapter for generating image-conditioned prompt offsets through a two-layer MLP, and DifficultyWeightCalculator for assigning learnable weights according to prediction confidence and misclassification status. In addition, an adaptive epoch schedule is adopted so that lower-shot settings receive longer training while higher-shot settings avoid unnecessary overfitting.
+This thesis presents a hard-sample weighting extension built on top of CoCoOp for fine-grained cat and dog classification, implemented in the project through the trainer named DynamicPromptTrainer. Built on CLIP, the method keeps the learnable context and image-conditional prompting scheme, and further introduces a difficulty weight calculator to assign learnable sample weights according to prediction confidence and misclassification status. In addition, an adaptive epoch schedule is adopted so that lower-shot settings receive longer training while higher-shot settings avoid unnecessary overfitting.
 
 Experiments are conducted on the Oxford-IIIT Pets dataset with five few-shot settings: 1-shot, 2-shot, 4-shot, 8-shot, and 16-shot. The proposed method achieves 85.9\%, 89.5\%, 89.2\%, and 89.8\% accuracy in the 2-shot, 4-shot, 8-shot, and 16-shot settings, respectively, outperforming CoCoOp in all four cases. The best result reaches 89.8\% under the 16-shot setting. These results show that combining image-conditioned prompts with difficulty-aware weighting is effective for improving CLIP-based fine-grained few-shot classification.
 
