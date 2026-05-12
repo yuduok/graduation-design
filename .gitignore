@@ -54,3 +54,6 @@ tensorboard/
 .swarm
 CLAUDE.md
 opencode.jsonc
+.agents
+.codex
+AGENTS.md
