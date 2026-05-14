@@ -3,7 +3,7 @@
   "topk_accuracies": {
     "Zero-shot CLIP": {
       "1": 0.012436264146250466,
-      "3": 0.31090660365626166,
+      "3": 0.32334286780251215,
       "5": 0.6715582638975252
     },
     "DynamicPrompt": {
@@ -19,7 +19,7 @@
     },
     "DynamicPrompt": {
       "top1_accuracy": 0.0,
-      "mean_confidence": 0.333763062953949
+      "mean_confidence": 0.33377158641815186
     }
   }
 }

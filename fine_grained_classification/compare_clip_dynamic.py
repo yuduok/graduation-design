@@ -5,6 +5,12 @@ import os
 import sys
 import argparse
 import json
+import numpy as np
+try:
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
 import torch
 import torch.nn as nn
 from collections import OrderedDict
@@ -452,6 +458,81 @@ def compute_top_k_accuracy(probs, labels, k=5):
     return correct / len(labels)
 
 
+def plot_top_k_accuracies(results, output_dir, k_values=[1, 3, 5]):
+    if not HAS_MATPLOTLIB:
+        print("matplotlib not available, skipping Top-K plot")
+        return
+    
+    valid_results = {k: v for k, v in results.items() if v["probabilities"].shape[0] > 1}
+    if not valid_results:
+        print("No valid results for Top-K comparison")
+        return
+    
+    labels = list(valid_results.values())[0]["labels"]
+    labels_tensor = torch.tensor(labels)
+    
+    topk_results = {}
+    for model_name, result in valid_results.items():
+        probs = result["probabilities"]
+        topk_accs = {}
+        for k in k_values:
+            topk_accs[k] = compute_top_k_accuracy(probs, labels_tensor, k) * 100
+        topk_results[model_name] = topk_accs
+    
+    x = np.arange(len(k_values))
+    width = 0.35
+    num_models = len(topk_results)
+    
+    plt.figure(figsize=(12, 6))
+    colors = ['#1f77b4', '#ff7f0e']
+    
+    for i, (model_name, topk_accs) in enumerate(topk_results.items()):
+        accuracies = [topk_accs[k] for k in k_values]
+        offset = (i - num_models/2 + 0.5) * width
+        bars = plt.bar(x + offset, accuracies, width, label=model_name, color=colors[i % len(colors)])
+        for bar, acc in zip(bars, accuracies):
+            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                    f'{acc:.1f}%', ha='center', va='bottom', fontsize=10)
+    
+    plt.xlabel("Top-K")
+    plt.ylabel("Accuracy (%)")
+    plt.title("Top-K Accuracy Comparison")
+    plt.xticks(x, [f"Top-{k}" for k in k_values])
+    plt.legend()
+    plt.ylim(0, 105)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "top_k_accuracies.png"), dpi=150)
+    plt.close()
+    print(f"Saved Top-K accuracies to {os.path.join(output_dir, 'top_k_accuracies.png')}")
+
+
+def plot_confidence_distribution(results, output_dir):
+    if not HAS_MATPLOTLIB:
+        print("matplotlib not available, skipping confidence plot")
+        return
+    
+    plt.figure(figsize=(16, 8))
+    
+    for i, (model_name, result) in enumerate(results.items()):
+        probs = result["probabilities"]
+        if probs.shape[0] == 1:
+            continue
+        max_probs = probs.max(dim=1).values.numpy()
+        
+        plt.subplot(1, len(results), i + 1)
+        plt.hist(max_probs, bins=50, alpha=0.7, edgecolor='black', color='#1f77b4' if i == 0 else '#ff7f0e')
+        plt.xlabel("Prediction Confidence", fontsize=12)
+        plt.ylabel("Count", fontsize=12)
+        plt.title(f"{model_name}\nMean: {max_probs.mean():.3f}", fontsize=14)
+        plt.xlim(0, 1)
+        plt.tick_params(axis='both', labelsize=10)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "confidence_distribution.png"), dpi=150)
+    plt.close()
+    print(f"Saved confidence distribution to {os.path.join(output_dir, 'confidence_distribution.png')}")
+
+
 def main():
     args = parse_args()
 
@@ -566,6 +647,11 @@ def main():
         if incorrect_mask.any():
             incorrect_confs = max_probs[incorrect_mask]
             print(f"  Incorrect Confidence: Mean={incorrect_confs.mean()*100:.2f}%, Median={incorrect_confs.median()*100:.2f}%")
+
+    # 生成图表
+    print("\nGenerating plots...")
+    plot_top_k_accuracies(results, args.output_dir)
+    plot_confidence_distribution(results, args.output_dir)
 
     # 保存摘要
     summary = {
