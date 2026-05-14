@@ -1,0 +1,86 @@
+{
+  "experiment_date": "2026-04-13",
+  "strategy": "adaptive_epochs",
+  "epoch_config": {
+    "1-shot": 100,
+    "2-shot": 80,
+    "4-shot": 60,
+    "8-shot": 40,
+    "16-shot": 20
+  },
+  "results": {
+    "DynamicPromptTrainer": {
+      "1-shot": {
+        "accuracy": 56.4,
+        "epochs": null
+      },
+      "2-shot": {
+        "accuracy": 59.1,
+        "epochs": null
+      },
+      "4-shot": {
+        "accuracy": 61.5,
+        "epochs": null
+      },
+      "8-shot": {
+        "accuracy": 61.2,
+        "epochs": null
+      },
+      "16-shot": {
+        "accuracy": 62.1,
+        "epochs": null
+      }
+    },
+    "CoOp": {
+      "1-shot": {
+        "accuracy": 50.9,
+        "epochs": 100
+      },
+      "2-shot": {
+        "accuracy": 58.1,
+        "epochs": 80
+      },
+      "4-shot": {
+        "accuracy": 63.7,
+        "epochs": 60
+      },
+      "8-shot": {
+        "accuracy": 67.3,
+        "epochs": 40
+      },
+      "16-shot": {
+        "accuracy": 69.0,
+        "epochs": 20
+      }
+    },
+    "CoCoOp": {
+      "1-shot": {
+        "accuracy": 54.0,
+        "epochs": null
+      },
+      "2-shot": {
+        "accuracy": 58.7,
+        "epochs": null
+      },
+      "4-shot": {
+        "accuracy": 60.8,
+        "epochs": null
+      },
+      "8-shot": {
+        "accuracy": 60.3,
+        "epochs": null
+      },
+      "16-shot": {
+        "accuracy": 61.9,
+        "epochs": null
+      }
+    }
+  },
+  "comparison_vs_cocoop": {
+    "1-shot": 2.4,
+    "2-shot": 0.4,
+    "4-shot": 0.7,
+    "8-shot": 0.9,
+    "16-shot": 0.2
+  }
+}

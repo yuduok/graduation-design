@@ -1,9 +1,9 @@
-# 细粒度猫狗分类系统 - 项目状态报告
+# 细粒度分类系统 - 项目状态报告
 
-**项目名称**: 基于动态提示词优化的细粒度猫狗分类系统
+**项目名称**: 基于动态提示词优化的细粒度分类系统
 **技术栈**: PyTorch 2.4.1 + CLIP (RN50) + Python 3.8+
-**数据集**: Oxford-IIIT Pets (7,390 张图片, 37 种猫狗品种)
-**更新时间**: 2026-04-23
+**支持数据集**: Oxford-IIIT Pets (37 种猫狗品种) / Stanford Cars (196 种汽车型号)
+**更新时间**: 2026-05-14
 
 ---
 
@@ -11,7 +11,14 @@
 
 ### 核心思路
 
-在预训练 CLIP 模型基础上，冻结图像/文本编码器，仅训练**动态提示词模块**，使提示词能根据每张输入图片自适应调整，从而提升细粒度品种的区分能力。
+在预训练 CLIP 模型基础上，冻结图像/文本编码器，仅训练**动态提示词模块**，使提示词能根据每张输入图片自适应调整，从而提升细粒度类别的区分能力。
+
+### 支持的数据集
+
+| 数据集 | 类别数 | 安全场景 | 特点 |
+|--------|--------|---------|------|
+| **Oxford-IIIT Pets** | 37 | 通用细粒度分类 | 猫狗品种分类，原始基准数据集 |
+| **Stanford Cars** | 196 | 自动驾驶/智能交通 | 汽车型号细粒度分类，安全关键场景 |
 
 ### 与 CoOp / CoCoOp 基线的核心区别
 
@@ -56,12 +63,16 @@ fine_grained_classification/
 ├── train.py                     # 训练入口（支持 CoOp/CoCoOp/DynamicPromptTrainer）
 ├── compare_models.py            # 模型对比评估脚本
 ├── evaluate.py                  # 评估脚本
+├── evaluate_security_ttc.py     # TTC 对抗安全评估脚本（支持 OxfordPets / StanfordCars）
 ├── collect_results.py           # 实验结果汇总与图表生成
-├── run_experiments.sh           # 自动化批量实验脚本
+├── run_experiments.sh           # Oxford Pets 自动化批量实验脚本
+├── run_experiments_stanford_cars.sh # Stanford Cars 自动化批量实验脚本
 ├── requirements.txt             # Python 依赖
+├── SECURITY.md                  # 安全验证文档
 ├── configs/
-│   ├── dynamic_rn50.yaml        # RN50 训练超参配置
-│   └── dynamic_vitb16.yaml      # ViT-B/16 训练超参配置
+│   ├── dynamic_rn50.yaml        # RN50 训练超参配置（Oxford Pets）
+│   ├── dynamic_vitb16.yaml      # ViT-B/16 训练超参配置
+│   └── stanford_cars_rn50.yaml  # RN50 训练超参配置（Stanford Cars）
 ├── models/
 │   ├── __init__.py              # 模型模块导出
 │   ├── custom_clip.py           # 自定义 CLIP（整合动态提示 + 语义增强）
@@ -71,7 +82,8 @@ fine_grained_classification/
 │   ├── adversarial_defense.py   # 对抗性防御模块（TTC 风格）
 │   └── robust_custom_clip.py    # 鲁棒 CLIP 模型
 ├── demo/
-│   └── pet_classifier_demo.py   # Streamlit 交互演示（研究增强版）
+│   ├── pet_classifier_demo.py   # Streamlit 交互演示（Oxford Pets）
+│   └── car_classifier_demo.py   # Streamlit 交互演示（Stanford Cars）
 ├── web/
 │   ├── app.py                   # Flask REST API 服务（研究增强版）
 │   └── static/
@@ -79,17 +91,24 @@ fine_grained_classification/
 ├── utils/
 │   └── helpers.py               # 可视化与度量工具
 ├── output_fgd/                  # 实验输出目录
-│   └── oxford_pets/
-│       ├── CoOp/                # CoOp 实验结果（shots_1/2/4/8/16）
-│       ├── CoCoOp/              # CoCoOp 实验结果（shots_1/2/4/8/16）
-│       ├── DynamicPromptTrainer/ # DynamicPrompt 实验结果（shots_1/2/4/8/16）
-│       └── experiment_summary.json # 实验结果摘要
+│   ├── oxford_pets/
+│   │   ├── CoOp/                # CoOp 实验结果（shots_1/2/4/8/16）
+│   │   ├── CoCoOp/              # CoCoOp 实验结果（shots_1/2/4/8/16）
+│   │   ├── DynamicPromptTrainer/ # DynamicPrompt 实验结果（shots_1/2/4/8/16）
+│   │   └── experiment_summary.json # 实验结果摘要
+│   └── stanford_cars/
+│       ├── CoOp/
+│       ├── CoCoOp/
+│       ├── DynamicPromptTrainer/
+│       └── experiment_summary.json
 ├── comparison_results/          # 模型对比结果
 │   ├── accuracy_comparison.png
 │   ├── confidence_distribution.png
 │   ├── top_k_accuracies.png
 │   └── comparison_summary.json
 ├── security_results/            # 对抗防御实验结果
+│   ├── ttc_dynamic_prompt_oxford_pets.json
+│   └── ttc_dynamic_prompt_stanford_cars.json
 ├── thesis/                      # 毕业论文 LaTeX 源文件
 │   ├── main.tex
 │   ├── chapters/
@@ -144,11 +163,15 @@ pip install -e .
 
 # 4. 准备数据集
 mkdir -p ../data/oxford_pets
-# 下载数据集到 ../data/oxford_pets/
+mkdir -p ../data/stanford_cars
+# 下载数据集到对应目录
 
-# 5. 开始训练
+# 5. 开始训练（Oxford Pets）
 cd ../../fine_grained_classification
 python train.py -d oxford_pets -e 50 -b 16 --shots 16 --trainer DynamicPromptTrainer --device cuda
+
+# 或训练 Stanford Cars
+python train.py -d stanford_cars -e 50 -b 16 --shots 16 --trainer DynamicPromptTrainer --device cuda
 ```
 
 ### 目录结构要求
@@ -162,11 +185,15 @@ graduation-design/
 │   ├── trainers/              # 训练器
 │   └── dassl/                 # Dassl 完整仓库（包含 dassl.data）
 ├── data/
-│   └── oxford_pets/           # 数据集
+│   ├── oxford_pets/           # Oxford Pets 数据集
+│   └── stanford_cars/         # Stanford Cars 数据集
 ├── fine_grained_classification/
 │   ├── train.py
+│   ├── evaluate_security_ttc.py
 │   └── ...
 └── output_fgd/                # 训练输出
+    ├── oxford_pets/
+    └── stanford_cars/
 ```
 
 ---
@@ -182,6 +209,8 @@ pip install streamlit flask flask-cors matplotlib seaborn scikit-learn
 
 ### 训练模型
 
+#### Oxford Pets
+
 ```bash
 # 在 fine_grained_classification/ 目录下执行
 # 单组实验（输出自动保存到 output_fgd/oxford_pets/{trainer}/shots_{n}/seed_{s}/）
@@ -189,6 +218,34 @@ python train.py -d oxford_pets -e 50 -b 16 --shots 16 --trainer DynamicPromptTra
 
 # 批量运行全部 15 组对比实验（3 方法 × 5 shots）
 bash run_experiments.sh cuda
+```
+
+#### Stanford Cars
+
+```bash
+# 单组实验（输出自动保存到 output_fgd/stanford_cars/{trainer}/shots_{n}/seed_{s}/）
+python train.py -d stanford_cars -e 50 -b 16 --shots 16 --trainer DynamicPromptTrainer --device cuda
+
+# 批量运行全部 15 组对比实验
+bash run_experiments_stanford_cars.sh cuda
+```
+
+### TTC 安全评估
+
+```bash
+# Oxford Pets
+python evaluate_security_ttc.py \
+  --dataset oxford_pets \
+  --shots 16 \
+  --seed 1 \
+  --device cuda
+
+# Stanford Cars
+python evaluate_security_ttc.py \
+  --dataset stanford_cars \
+  --shots 16 \
+  --seed 1 \
+  --device cuda
 ```
 
 ### 启动演示
@@ -223,14 +280,17 @@ python app.py --port 5001
 #### Streamlit 交互演示
 
 ```bash
-# Streamlit 界面 → http://localhost:8501
+# Oxford Pets 演示
 streamlit run demo/pet_classifier_demo.py
+
+# Stanford Cars 演示
+streamlit run demo/car_classifier_demo.py
 ```
 
 功能标签页：
 - **🔍 分类演示** - 上传图片，选择提示词模式，对比 Zero-shot
 - **📊 研究结果** - 实验数据表格、方法对比、自适应 Epoch 策略
-- **📚 品种知识库** - 37 种猫狗品种属性浏览（毛发/面部/体型/性格）
+- **📚 知识库** - 类别属性浏览（Oxford Pets: 毛发/面部/体型/性格；Stanford Cars: 年份/品牌/型号）
 - **🔌 API 文档** - 完整接口说明
 
 > 加载训练模型后，Web API 自动切换为**动态提示词推理模式**，通过 `SoftPromptAdapter` 生成图像条件化的提示词。
@@ -244,7 +304,7 @@ streamlit run demo/pet_classifier_demo.py
 ### 已完成
 
 - [x] 核心模型模块（dynamic_prompt / custom_clip / trainer / breed_semantic）
-- [x] 训练流程（train.py 支持 3 种 trainer + few-shot 配置）
+- [x] 训练流程（train.py 支持 3 种 trainer + few-shot 配置 + 多数据集）
 - [x] Web 演示（Streamlit + Flask API + 前端 HTML 页面）
 - [x] 所有单元测试通过（test_core / test_demo / test_full）
 - [x] Bug 修复：logit_scale 缺失、类名错误（36→37 类）、导入路径等
@@ -261,9 +321,14 @@ streamlit run demo/pet_classifier_demo.py
 - [x] **Web API 研究增强版完成** - 新增多模型对比、品种语义信息、实验结果展示、调试信息
 - [x] **前端 HTML 页面完成** - 交互式分类、品种知识库、实验结果看板
 - [x] **Streamlit Demo 研究增强版完成** - 四标签页：分类演示/研究结果/品种知识库/API文档
+- [x] **Stanford Cars 数据集支持** - 新增 196 类汽车型号细粒度分类
+- [x] **TTC 安全评估扩展** - 支持 OxfordPets / StanfordCars 双数据集
+- [x] **汽车分类 Demo** - 新增 `demo/car_classifier_demo.py`
+- [x] **安全文档更新** - `SECURITY.md` 新增 Stanford Cars 使用说明
 
 ### 待完成
 
+- [ ] Stanford Cars 实验训练与结果收集
 - [ ] 撰写论文实验章节
 - [ ] 对抗防御实验完整评估
 - [ ] ViT-B/16 骨干网络实验
@@ -282,7 +347,7 @@ streamlit run demo/pet_classifier_demo.py
 - 16-shot → 20 epochs
 
 || 方法 | 1-shot (ep100) | 2-shot (ep80) | 4-shot (ep60) | 8-shot (ep40) | 16-shot (ep20) |
-||------|----------------|----------------|----------------|----------------|-----------------|
+||------|----------------|----------------|----------------|----------------|----------------|
 || Zero-shot CLIP | ~81% | ~81% | ~81% | ~81% | ~81% |
 || CoOp | 80.9% | 82.6% | 87.2% | 86.8% | 89.3% |
 || CoCoOp | 86.8% | 83.5% | 89.1% | 88.6% | 89.6% |
@@ -306,11 +371,33 @@ streamlit run demo/pet_classifier_demo.py
 |- 16-shot: +0.2%（领先，达到最佳 89.8%）
 |- **结论：在 2/4/8/16-shot 均优于 CoCoOp，整体表现更优**
 
-> 2026-04-13 更新：使用可学习难度权重 + 自适应 Epoch 策略，结果显著改善。
+### Stanford Cars 实验（待完成）
+
+| 数据集 | 类别数 | 状态 | 说明 |
+|--------|--------|------|------|
+| OxfordPets | 37 | ✅ 已完成 | 最佳 89.8%（16-shot） |
+| StanfordCars | 196 | ⏳ 待训练 | 安全关键场景，自动驾驶应用 |
+
+> 2026-05-14 更新：新增 Stanford Cars 数据集支持，训练脚本和评估工具已就绪，待执行训练。
 
 ---
 
 ## 八、已修复 Bug 记录
+
+### 2026-05-14：多数据集支持（Stanford Cars）
+
+**新增功能**：
+1. **Stanford Cars 数据集支持** — 新增 196 类汽车型号细粒度分类
+   - 新增 `configs/stanford_cars_rn50.yaml` 配置文件
+   - 新增 `run_experiments_stanford_cars.sh` 批量训练脚本
+   - `train.py` 已原生支持 `stanford_cars` 数据集
+2. **汽车分类 Demo** — 新增 `demo/car_classifier_demo.py`
+   - Streamlit 交互界面，支持 196 类汽车型号识别
+   - 车型知识库（年份/品牌/型号）
+3. **TTC 安全评估扩展** — `evaluate_security_ttc.py` 支持双数据集
+   - `--dataset oxford_pets` / `--dataset stanford_cars`
+   - 自动根据数据集命名输出文件
+4. **文档更新** — README.md / SECURITY.md / PROJECT_STATUS.md 全面更新
 
 ### 2026-04-23：Web 界面和 API 研究增强版
 
@@ -394,3 +481,5 @@ streamlit run demo/pet_classifier_demo.py
 5. **动态提示词推理** — Web 端加载训练模型后自动切换为动态推理模式
 6. **跨设备兼容** — CUDA 训练的模型可在 Mac CPU/MPS 上无缝使用
 7. **研究增强版 Web 界面** — 多模型对比、品种语义信息、实验结果展示、调试信息可视化
+8. **多数据集支持** — 支持 Oxford Pets（37类猫狗）和 Stanford Cars（196类汽车），覆盖通用分类和安全关键场景
+9. **TTC 安全评估** — 支持对抗攻击防御评估，适用于不同数据集的安全分析

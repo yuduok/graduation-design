@@ -1,0 +1,25 @@
+{
+  "backbone": "RN50",
+  "topk_accuracies": {
+    "Zero-shot CLIP": {
+      "1": 0.012436264146250466,
+      "3": 0.31090660365626166,
+      "5": 0.6715582638975252
+    },
+    "DynamicPrompt": {
+      "1": 0.0,
+      "3": 0.04974505658500186,
+      "5": 0.2238527546325084
+    }
+  },
+  "models": {
+    "Zero-shot CLIP": {
+      "top1_accuracy": 0.00012436264146250465,
+      "mean_confidence": 0.268798828125
+    },
+    "DynamicPrompt": {
+      "top1_accuracy": 0.0,
+      "mean_confidence": 0.333763062953949
+    }
+  }
+}

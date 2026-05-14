@@ -2,7 +2,7 @@
 
 ## 概述
 
-本项目当前采用的安全验证方案，是**直接复用 `CLIP-Test-time-Counterattacks` 的 TTC 原始实现**，并将其桥接到当前细粒度猫狗分类模型上进行测试。
+本项目当前采用的安全验证方案，是**直接复用 `CLIP-Test-time-Counterattacks` 的 TTC 原始实现**，并将其桥接到当前细粒度分类模型上进行测试。
 
 入口脚本：
 
@@ -12,14 +12,21 @@ fine_grained_classification/evaluate_security_ttc.py
 
 该方案的目标不是在项目内重新实现 TTC，而是尽量保持论文代码路径不变，只替换以下两部分：
 
-- 数据集来源：改为当前项目的 `OxfordPets` 测试集
+- 数据集来源：支持 `OxfordPets` 和 `StanfordCars` 测试集
 - 被测模型：改为当前项目训练得到的 `DynamicPromptTrainer` checkpoint
+
+## 支持的数据集
+
+| 数据集 | 类别数 | 安全场景 | 说明 |
+|--------|--------|---------|------|
+| **OxfordPets** | 37 | 通用细粒度分类 | 猫狗品种分类（原始基准） |
+| **StanfordCars** | 196 | 自动驾驶/智能交通 | 汽车型号细粒度分类 |
 
 ## 方法说明
 
 桥接脚本的执行流程如下：
 
-1. 加载当前项目的 `OxfordPets` 测试集
+1. 加载指定数据集的测试集（`OxfordPets` 或 `StanfordCars`）
 2. 加载 `DynamicPromptTrainer` 的 `prompt_learner` checkpoint
 3. 将测试图像从 Dassl/CoOp 的归一化张量反归一化回 `[0, 1]`
 4. 按 TTC 原始代码中的 `clip_img_preprocessing` 重新送入 CLIP 编码器
@@ -32,14 +39,22 @@ fine_grained_classification/evaluate_security_ttc.py
 - TTC 的 `tau` 计算逻辑沿用原始实现
 - TTC 的加权 counterattack 逻辑沿用原始实现
 - 评估对象是你当前项目训练出的细粒度分类模型
+- 支持多数据集评估，便于对比不同场景下的鲁棒性
 
 ## 相关文件
 
 ```text
 fine_grained_classification/
-├── evaluate_security_ttc.py
+├── evaluate_security_ttc.py    # TTC 评估脚本（支持 OxfordPets / StanfordCars）
 ├── SECURITY.md
-└── security_results/
+├── security_results/
+│   ├── ttc_dynamic_prompt_oxford_pets.json
+│   └── ttc_dynamic_prompt_stanford_cars.json
+└── output_fgd/
+    ├── oxford_pets/
+    │   └── DynamicPromptTrainer/
+    └── stanford_cars/
+        └── DynamicPromptTrainer/
 
 CLIP-Test-time-Counterattacks/
 └── code/
@@ -62,14 +77,26 @@ python fine_grained_classification/evaluate_security_ttc.py \
   --max-batches 1
 ```
 
-### 2. 完整评估
-
-推荐在 CUDA 环境下运行：
+### 2. Oxford Pets 完整评估
 
 ```bash
 python fine_grained_classification/evaluate_security_ttc.py \
   --dataset oxford_pets \
-  --shots 1 \
+  --shots 16 \
+  --seed 1 \
+  --device cuda \
+  --ttc-eps 0.011764705882352941 \
+  --ttc-numsteps 2 \
+  --tau-thres 0.6 \
+  --beta 1.0
+```
+
+### 3. Stanford Cars 完整评估
+
+```bash
+python fine_grained_classification/evaluate_security_ttc.py \
+  --dataset stanford_cars \
+  --shots 16 \
   --seed 1 \
   --device cuda \
   --ttc-eps 0.011764705882352941 \
@@ -81,7 +108,11 @@ python fine_grained_classification/evaluate_security_ttc.py \
 如果不显式指定 `--model-path`，脚本会自动在以下目录寻找 checkpoint：
 
 ```bash
+# Oxford Pets
 fine_grained_classification/output_fgd/oxford_pets/DynamicPromptTrainer/shots_{shots}/seed_{seed}/prompt_learner/
+
+# Stanford Cars
+fine_grained_classification/output_fgd/stanford_cars/DynamicPromptTrainer/shots_{shots}/seed_{seed}/prompt_learner/
 ```
 
 ## 参数说明
@@ -108,19 +139,24 @@ fine_grained_classification/output_fgd/oxford_pets/DynamicPromptTrainer/shots_{s
 
 | 参数 | 含义 |
 |------|------|
+| `--dataset` | 数据集：`oxford_pets` / `stanford_cars` |
 | `--device` | 运行设备：`cpu` / `cuda` / `mps` |
 | `--batch-size` | 测试 batch size |
 | `--num-workers` | DataLoader worker 数 |
 | `--max-batches` | 仅测试前若干个 batch，便于调试 |
 | `--model-path` | 手动指定 checkpoint 路径 |
-| `--output` | 结果 JSON 输出路径 |
+| `--output` | 结果 JSON 输出路径（默认自动根据数据集命名） |
 
 ## 输出结果
 
-结果默认保存到：
+结果自动保存到：
 
 ```bash
+# Oxford Pets 默认输出
 fine_grained_classification/security_results/ttc_dynamic_prompt_oxford_pets.json
+
+# Stanford Cars 默认输出
+fine_grained_classification/security_results/ttc_dynamic_prompt_stanford_cars.json
 ```
 
 输出字段包括：
@@ -134,6 +170,7 @@ fine_grained_classification/security_results/ttc_dynamic_prompt_oxford_pets.json
 - `mean_clean_tau`：干净样本平均 `tau`
 - `mean_adv_tau`：对抗样本平均 `tau`
 - `num_samples`：实际评估样本数
+- `dataset`：评估使用的数据集名称
 
 ## 运行建议
 
@@ -141,15 +178,18 @@ fine_grained_classification/security_results/ttc_dynamic_prompt_oxford_pets.json
 - CPU 可以跑通，但速度较慢，完整测试建议使用 `cuda`
 - 如果只想验证某个特定模型，直接传 `--model-path`
 - 若需要论文实验，建议固定 `shots`、`seed`、攻击参数和 TTC 参数，分别保存结果文件
+- **Stanford Cars** 数据集具有更强的安全场景关联（自动驾驶），推荐用于安全分析
 
 ## 当前实现说明
 
-为适配当前环境，已做两处必要处理：
+为适配当前环境，已做必要处理：
 
 - TTC 评估脚本中显式兼容当前 PyTorch 的 checkpoint 加载方式
 - `CLIP-Test-time-Counterattacks/code/attacks.py` 做了最小修改，使其不依赖强制 `.cuda()`，并在未安装 `autoattack` 时不影响 PGD 路径
+- 支持多数据集自动切换，通过 `--dataset` 参数控制
+- 输出文件名自动根据数据集名称生成，避免覆盖
 
-这两处修改不改变当前采用的 TTC 核心评估逻辑。
+这些修改不改变当前采用的 TTC 核心评估逻辑。
 
 ## 参考
 

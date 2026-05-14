@@ -1,7 +1,7 @@
 """
-Web API服务 - 细粒度猫狗分类（研究增强版）
-Flask API for Fine-Grained Pet Classification Research Demo
-支持：动态提示词推理 / 多模型对比 / 品种语义信息 / 实验结果展示
+Web API服务 - 细粒度汽车分类（研究增强版）
+Flask API for Fine-Grained Car Classification Research Demo
+支持：动态提示词推理 / 多模型对比 / 车型语义信息 / 实验结果展示
 """
 import os
 import sys
@@ -26,7 +26,7 @@ FGDC_PATH = os.path.join(PROJECT_ROOT, "fine_grained_classification")
 sys.path.insert(0, FGDC_PATH)
 
 # 导入CoOp数据集模块（注册数据集到DATASET_REGISTRY）
-import datasets.oxford_pets  # noqa: F401
+import datasets.stanford_cars  # noqa: F401
 
 import clip
 from clip.simple_tokenizer import SimpleTokenizer
@@ -35,8 +35,8 @@ app = Flask(__name__, static_folder='static')
 CORS(app)
 
 
-class PetClassifierAPI:
-    """宠物分类API服务 - 研究增强版"""
+class CarClassifierAPI:
+    """汽车分类API服务 - 研究增强版"""
 
     def __init__(self, model_path=None, shot="16"):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -48,10 +48,6 @@ class PetClassifierAPI:
         self.model_path = model_path
         self.shot = shot
 
-        # 品种属性数据库
-        from models.breed_semantic import BreedAttributeDatabase
-        self.breed_db = BreedAttributeDatabase()
-
         # 实验结果缓存
         self.experiment_summary = self._load_experiment_summary()
 
@@ -59,7 +55,7 @@ class PetClassifierAPI:
 
     def _load_experiment_summary(self):
         """加载实验结果摘要"""
-        summary_path = os.path.join(FGDC_PATH, "output_fgd", "oxford_pets", "experiment_summary.json")
+        summary_path = os.path.join(FGDC_PATH, "output_fgd", "stanford_cars", "experiment_summary.json")
         if os.path.exists(summary_path):
             with open(summary_path, 'r') as f:
                 return json.load(f)
@@ -72,20 +68,9 @@ class PetClassifierAPI:
         self.clip_model.eval()
         self.clip_model = self.clip_model.float()
 
-        # Oxford-IIIT Pets 37类（与数据集严格一致）
-        self.classnames = [
-            'abyssinian', 'american_bulldog', 'american_pit_bull_terrier',
-            'basset_hound', 'beagle', 'bengal',
-            'birman', 'bombay', 'boxer', 'british_shorthair', 'chihuahua',
-            'egyptian_mau', 'english_cocker_spaniel', 'english_setter',
-            'german_shorthaired', 'great_pyrenees', 'havanese',
-            'japanese_chin', 'keeshond', 'leonberger',
-            'maine_coon', 'miniature_pinscher', 'newfoundland',
-            'persian', 'pomeranian', 'pug', 'ragdoll', 'russian_blue',
-            'saint_bernard', 'samoyed', 'scottish_terrier', 'shiba_inu',
-            'siamese', 'sphynx', 'staffordshire_bull_terrier',
-            'wheaten_terrier', 'yorkshire_terrier'
-        ]
+        # Stanford Cars 196类（与数据集严格一致）
+        # 实际使用时应该从训练好的模型或数据集中加载类别名称
+        self.classnames = self._load_car_classes()
 
         # 如果提供了模型路径，加载训练好的模型
         if model_path and os.path.exists(model_path):
@@ -97,6 +82,128 @@ class PetClassifierAPI:
         else:
             print("Using zero-shot CLIP model")
         print("Model loaded successfully!")
+
+    def _load_car_classes(self):
+        """加载Stanford Cars类别列表"""
+        # 尝试从CoOp数据集加载
+        try:
+            from dassl.data.datasets import DATASET_REGISTRY
+            from dassl.config import get_cfg_default
+            cfg = get_cfg_default()
+            cfg.DATASET.NAME = "StanfordCars"
+            cfg.DATASET.ROOT = os.path.join(PROJECT_ROOT, "data")
+            # 添加缺失的 SUBSAMPLE_CLASSES 配置
+            cfg.DATASET.SUBSAMPLE_CLASSES = "all"
+            dataset_class = DATASET_REGISTRY.get("StanfordCars")
+            if dataset_class:
+                cfg.defrost()
+                cfg.DATASET.NUM_SHOTS = 16
+                cfg.SEED = 1
+                cfg.freeze()
+                dataset = dataset_class(cfg)
+                return dataset.classnames
+        except Exception as e:
+            print(f"无法从数据集加载类别名称: {e}")
+
+        # 如果无法加载，返回简化列表
+        return [
+            "AM General Hummer SUV 2000", "Acura RL Sedan 2012", "Acura TL Sedan 2012",
+            "Acura TL Type-S 2008", "Acura TSX Sedan 2012", "Acura Integra Type R 2001",
+            "Acura ZDX Hatchback 2012", "Aston Martin V8 Vantage Convertible 2012",
+            "Aston Martin V8 Vantage Coupe 2012", "Aston Martin Virage Convertible 2012",
+            "Aston Martin Virage Coupe 2012", "Audi RS 4 Convertible 2008",
+            "Audi A5 Coupe 2012", "Audi TTS Coupe 2012", "Audi R8 Coupe 2012",
+            "Audi V8 Sedan 1994", "Audi 100 Sedan 1994", "Audi 100 Wagon 1994",
+            "Audi TT Hatchback 2011", "Audi S6 Sedan 2011", "Audi S5 Convertible 2012",
+            "Audi S5 Coupe 2012", "Audi S4 Sedan 2012", "Audi S4 Sedan 2007",
+            "Audi TT RS Coupe 2012", "BMW ActiveHybrid 5 Sedan 2012",
+            "BMW 1 Series Convertible 2012", "BMW 1 Series Coupe 2012",
+            "BMW 3 Series Sedan 2012", "BMW 3 Series Wagon 2012",
+            "BMW 6 Series Convertible 2007", "BMW X5 SUV 2007", "BMW X6 SUV 2012",
+            "BMW M3 Coupe 2012", "BMW M5 Sedan 2010", "BMW M6 Convertible 2010",
+            "BMW Z4 Convertible 2012", "Bentley Arctic GT Convertible 2012",
+            "Bentley Arctic GT Coupe 2012", "Bentley Mulsanne Sedan 2011",
+            "Bentley Continental GT Coupe 2007", "Bentley Continental Supersports Conv. Convertible 2012",
+            "Bugatti Veyron 16.4 Convertible 2009", "Bugatti Veyron 16.4 Coupe 2009",
+            "Buick Regal GS 2012", "Buick Rainier SUV 2007", "Buick Verano Sedan 2012",
+            "Buick Enclave SUV 2012", "Cadillac CTS-V Sedan 2012", "Cadillac SRX SUV 2012",
+            "Cadillac Escalade EXT Crew Cab 2007", "Chevrolet Silverado 1500 Hybrid Crew Cab 2012",
+            "Chevrolet Corvette Convertible 2012", "Chevrolet Corvette ZR1 2012",
+            "Chevrolet Corvette Ron Fellows Edition Z06 2007", "Chevrolet Traverse SUV 2012",
+            "Chevrolet Camaro Convertible 2012", "Chevrolet HHR SS 2010",
+            "Chevrolet Impala Sedan 2007", "Chevrolet Tahoe Hybrid SUV 2012",
+            "Chevrolet Sonic Sedan 2012", "Chevrolet Express Cargo Van 2007",
+            "Chevrolet Avalanche Crew Cab 2012", "Chevrolet Cobalt SS 2010",
+            "Chevrolet Malibu Hybrid Sedan 2010", "Chevrolet TrailBlazer SS 2009",
+            "Chevrolet Silverado 1500 Regular Cab 2012", "Chevrolet Silverado 1500 Crew Cab 2007",
+            "Chevrolet Silverado 2500HD Regular Cab 2012", "Chevrolet Spark Hatchback 2012",
+            "Chevrolet Equinox SUV 2010", "Chevrolet Camaro Coupe 2012",
+            "Chevrolet Cruze Sedan 2012", "Chrysler PT Cruiser Convertible 2008",
+            "Chrysler 300 SRT-8 2010", "Chrysler Crossfire Convertible 2008",
+            "Chrysler Sebring Convertible 2010", "Chrysler Town and Country Minivan 2012",
+            "Chrysler 300 Sedan 2012", "Chrysler Aspen SUV 2009",
+            "Daewoo Nubira Wagon 2002", "Dodge Caliber Wagon 2012",
+            "Dodge Caliber Wagon 2007", "Dodge Caravan Minivan 1997",
+            "Dodge Ram Pickup 3500 Crew Cab 2010", "Dodge Ram Pickup 3500 Quad Cab 2009",
+            "Dodge Sprinter Cargo Van 2009", "Dodge Journey SUV 2012",
+            "Dodge Dakota Crew Cab 2010", "Dodge Dakota Club Cab 2007",
+            "Dodge Magnum Wagon 2008", "Dodge Challenger SRT8 2011",
+            "Dodge Durango SUV 2012", "Dodge Durango SUV 2007",
+            "Dodge Charger Sedan 2012", "Dodge Charger SRT-8 2009",
+            "Eagle Talon Hatchback 1998", "FIAT 500 Abarth 2012",
+            "FIAT 500 Convertible 2012", "Ferrari FF Coupe 2012",
+            "Ferrari California Convertible 2012", "Ferrari 458 Italia Convertible 2012",
+            "Ferrari 458 Italia Coupe 2012", "Fisker Karma Sedan 2012",
+            "Ford F-450 Super Duty Crew Cab 2012", "Ford Mustang Convertible 2007",
+            "Ford Focus Sedan 2007", "Ford Focus Hatchback 2012",
+            "Ford E-Series Wagon Van 2012", "Ford Fiesta Sedan 2012",
+            "Ford Ranger SuperCab 2011", "Ford GT Coupe 2006",
+            "Ford F-150 Regular Cab 2012", "Ford F-150 Regular Cab 2007",
+            "Ford Fusion Sedan 2012", "Ford Escape SUV 2009",
+            "Ford Edge SUV 2007", "Ford Expedition EL SUV 2009",
+            "Ford Explorer SUV 2012", "GMC Yukon Hybrid SUV 2012",
+            "GMC Acadia SUV 2012", "GMC Terrain SUV 2012",
+            "GMC Savana Van 2012", "GMC Canyon Extended Cab 2012",
+            "Geo Metro Convertible 1993", "HUMMER H3T Crew Cab 2010",
+            "HUMMER H2 SUT Crew Cab 2009", "Honda Odyssey Minivan 2012",
+            "Honda Odyssey Minivan 2007", "Honda Accord Coupe 2012",
+            "Honda Accord Sedan 2012", "Honda Pilot SUV 2012",
+            "Hyundai Veloster Hatchback 2012", "Hyundai Santa Fe SUV 2012",
+            "Hyundai Tucson SUV 2012", "Hyundai Veracruz SUV 2012",
+            "Hyundai Sonata Hybrid Sedan 2012", "Hyundai Elantra Sedan 2007",
+            "Hyundai Accent Sedan 2012", "Hyundai Genesis Sedan 2012",
+            "Hyundai Sonata Sedan 2012", "Hyundai Elantra Touring Hatchback 2012",
+            "Hyundai Azera Sedan 2012", "Infiniti G Coupe IPL 2012",
+            "Infiniti QX56 SUV 2011", "Isuzu Ascender SUV 2008",
+            "Jaguar XK XKR 2012", "Jeep Patriot SUV 2012",
+            "Jeep Wrangler SUV 2012", "Jeep Liberty SUV 2012",
+            "Jeep Grand Cherokee SUV 2012", "Jeep Compass SUV 2012",
+            "Lamborghini Reventon Coupe 2008", "Lamborghini Aventador Coupe 2012",
+            "Lamborghini Gallardo LP 570-4 Superleggera 2012", "Lamborghini Diablo Coupe 2001",
+            "Land Rover Range Rover SUV 2012", "Land Rover LR2 SUV 2012",
+            "Lincoln Town Car Sedan 2011", "MINI Cooper Roadster Convertible 2012",
+            "Maybach Landaulet Convertible 2012", "Mazda Tribute SUV 2011",
+            "McLaren MP4-12C Coupe 2012", "Mercedes-Benz 300-Class Convertible 1993",
+            "Mercedes-Benz C-Class Sedan 2012", "Mercedes-Benz SL-Class Coupe 2009",
+            "Mercedes-Benz E-Class Sedan 2012", "Mercedes-Benz S-Class Sedan 2009",
+            "Mercedes-Benz Sprinter Van 2012", "Mitsubishi Lancer Sedan 2012",
+            "Nissan Leaf Hatchback 2012", "Nissan NV Passenger Van 2012",
+            "Nissan Juke Hatchback 2012", "Nissan 240SX Coupe 1998",
+            "Plymouth Neon Coupe 1999", "Porsche Panamera Sedan 2012",
+            "Ram C/V Cargo Van Minivan 2012", "Rolls-Royce Phantom Drophead Coupe Convertible 2012",
+            "Rolls-Royce Ghost Sedan 2012", "Rolls-Royce Phantom Sedan 2012",
+            "Scion xD Hatchback 2012", "Spyker C8 Convertible 2009",
+            "Spyker C8 Coupe 2009", "Suzuki Aerio Sedan 2007",
+            "Suzuki Kizashi Sedan 2012", "Suzuki SX4 Hatchback 2012",
+            "Suzuki SX4 Sedan 2012", "Tesla Model S Sedan 2012",
+            "Toyota Sequoia SUV 2012", "Toyota Camry Sedan 2012",
+            "Toyota Corolla Sedan 2012", "Toyota 4Runner SUV 2012",
+            "Volkswagen Beetle Hatchback 2012", "Volkswagen Golf Hatchback 2012",
+            "Volkswagen Golf Hatchback 1991", "Volkswagen CC Sedan 2012",
+            "Volkswagen Rabbit Hatchback 2006", "Volvo C30 Hatchback 2012",
+            "Volvo 240 Sedan 1993", "Volvo XC90 SUV 2007",
+            "smart fortwo Convertible 2012",
+        ]
 
     def load_trained_model(self, model_path):
         """加载训练好的模型（包括动态提示词学习器和文本编码器）"""
@@ -111,7 +218,6 @@ class PetClassifierAPI:
             from models.dynamic_prompt import AdaptivePromptLearner
 
             # 记录原始设备，将 clip_model 临时移到 CPU
-            # 避免 AdaptivePromptLearner 初始化时内部 buffer 被创建在 CUDA 上
             original_device = next(self.clip_model.parameters()).device
             self.clip_model = self.clip_model.cpu()
 
@@ -185,13 +291,7 @@ class PetClassifierAPI:
     def predict(self, image_tensor, top_k=5, prompt_template=None):
         """
         预测 - 动态提示词推理路径
-        Args:
-            image_tensor: 预处理后的图像tensor
-            top_k: 返回Top-K结果
-            prompt_template: 自定义提示词模板（仅 zero-shot 模式生效）
-        Returns:
-            results: 预测结果列表
-            debug_info: 调试信息（动态提示词相关）
+        支持分批编码文本特征以避免显存溢出
         """
         debug_info = {}
 
@@ -207,27 +307,43 @@ class PetClassifierAPI:
                 prompts_flat = prompts.squeeze(0)
 
                 tokenized_prompts = self.prompt_learner.tokenized_prompts.to(self.device)
-                text_features = self.text_encoder(prompts_flat, tokenized_prompts)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+                # 分批编码文本特征（避免196类显存溢出）
+                chunk_size = 50
+                all_text_features = []
+                for i in range(0, n_cls, chunk_size):
+                    end_i = min(i + chunk_size, n_cls)
+                    chunk_prompts = prompts_flat[i:end_i]
+                    chunk_tokenized = tokenized_prompts[i:end_i]
+                    chunk_features = self.text_encoder(chunk_prompts, chunk_tokenized)
+                    chunk_features = chunk_features / chunk_features.norm(dim=-1, keepdim=True)
+                    all_text_features.append(chunk_features)
+
+                    # 及时释放显存
+                    del chunk_prompts, chunk_tokenized, chunk_features
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+                text_features = torch.cat(all_text_features, dim=0)
 
                 logit_scale = self.clip_model.logit_scale.exp()
                 logits = logit_scale * (image_features @ text_features.T).squeeze()
                 probs = logits.softmax(dim=-1)
 
-                # 构建提示词描述：优先使用用户自定义模板
+                # 构建提示词描述
                 if prompt_template and "{cls}" in prompt_template:
-                    prompt_labels = [prompt_template.format(cls=name.replace('_', ' '))
+                    prompt_labels = [prompt_template.format(cls=name)
                                      for name in self.classnames]
                 else:
-                    prompt_labels = [f"[dynamic] adaptive prompt for {name.replace('_', ' ')}"
+                    prompt_labels = [f"[dynamic] adaptive prompt for {name}"
                                      for name in self.classnames]
 
-                # 收集调试信息：动态提示词统计
+                # 收集调试信息
                 debug_info["mode"] = "dynamic_prompt"
                 debug_info["prompt_shape"] = list(prompts.shape)
                 debug_info["ctx_norm"] = self.prompt_learner.ctx.norm().item()
 
-                # 获取 SoftPromptAdapter 的偏移信息（如果有）
+                # 获取 SoftPromptAdapter 的偏移信息
                 if self.prompt_learner.soft_prompt_adapter is not None:
                     base_ctx = self.prompt_learner.ctx
                     bias = self.prompt_learner.soft_prompt_adapter.meta_net(image_features)
@@ -244,10 +360,10 @@ class PetClassifierAPI:
             else:
                 # ====== Zero-shot 推理路径 ======
                 if prompt_template and "{cls}" in prompt_template:
-                    prompt_labels = [prompt_template.format(cls=name.replace('_', ' '))
+                    prompt_labels = [prompt_template.format(cls=name)
                                      for name in self.classnames]
                 else:
-                    prompt_labels = [f"a photo of a {name.replace('_', ' ')}"
+                    prompt_labels = [f"a photo of a {name}"
                                      for name in self.classnames]
 
                 tokens = clip.tokenize(prompt_labels).to(self.device)
@@ -265,18 +381,23 @@ class PetClassifierAPI:
 
             results = []
             for prob, idx in zip(top_probs, top_indices):
-                breed_name = self.classnames[idx.item()]
+                car_name = self.classnames[idx.item()]
+                # 解析年份和品牌
+                parts = car_name.split()
+                year = parts[0] if parts[0].isdigit() else "Unknown"
+                brand = parts[1] if len(parts) > 1 else "Unknown"
                 results.append({
-                    "breed": breed_name.replace('_', ' '),
+                    "car_model": car_name,
+                    "brand": brand,
+                    "year": year,
                     "prompt": prompt_labels[idx.item()],
-                    "probability": round(prob.item(), 4),
-                    "attributes": self.breed_db.get_attributes(breed_name.replace('_', ' ').title())
+                    "probability": round(prob.item(), 4)
                 })
 
-            # 添加所有类别的概率分布（用于可视化）
+            # 添加所有类别的概率分布
             all_probs = probs.cpu().tolist()
             debug_info["all_probabilities"] = {
-                self.classnames[i].replace('_', ' '): round(p, 4)
+                self.classnames[i]: round(p, 4)
                 for i, p in enumerate(all_probs)
             }
             debug_info["top1_confidence"] = round(top_probs[0].item(), 4)
@@ -291,10 +412,10 @@ class PetClassifierAPI:
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
             if prompt_template and "{cls}" in prompt_template:
-                prompt_labels = [prompt_template.format(cls=name.replace('_', ' '))
+                prompt_labels = [prompt_template.format(cls=name)
                                  for name in self.classnames]
             else:
-                prompt_labels = [f"a photo of a {name.replace('_', ' ')}"
+                prompt_labels = [f"a photo of a {name}"
                                  for name in self.classnames]
 
             tokens = clip.tokenize(prompt_labels).to(self.device)
@@ -309,18 +430,22 @@ class PetClassifierAPI:
 
             results = []
             for prob, idx in zip(top_probs, top_indices):
-                breed_name = self.classnames[idx.item()]
+                car_name = self.classnames[idx.item()]
+                parts = car_name.split()
+                year = parts[0] if parts[0].isdigit() else "Unknown"
+                brand = parts[1] if len(parts) > 1 else "Unknown"
                 results.append({
-                    "breed": breed_name.replace('_', ' '),
-                    "probability": round(prob.item(), 4),
-                    "attributes": self.breed_db.get_attributes(breed_name.replace('_', ' ').title())
+                    "car_model": car_name,
+                    "brand": brand,
+                    "year": year,
+                    "probability": round(prob.item(), 4)
                 })
 
             return results
 
 
 # ============ 全局分类器实例 ============
-classifier = PetClassifierAPI()
+classifier = CarClassifierAPI()
 
 
 # ============ API 路由 ============
@@ -360,11 +485,11 @@ def classify():
             zero_shot_results = classifier.predict_zero_shot(image_tensor, top_k, prompt_template)
             response["zero_shot_predictions"] = zero_shot_results
             response["comparison"] = {
-                "dynamic_top1": results[0]["breed"],
+                "dynamic_top1": results[0]["car_model"],
                 "dynamic_confidence": results[0]["probability"],
-                "zero_shot_top1": zero_shot_results[0]["breed"],
+                "zero_shot_top1": zero_shot_results[0]["car_model"],
                 "zero_shot_confidence": zero_shot_results[0]["probability"],
-                "agreement": results[0]["breed"] == zero_shot_results[0]["breed"]
+                "agreement": results[0]["car_model"] == zero_shot_results[0]["car_model"]
             }
 
         return jsonify(response)
@@ -376,10 +501,7 @@ def classify():
 
 @app.route('/api/compare', methods=['POST'])
 def compare_models():
-    """
-    多模型对比API
-    同时用 Zero-shot CLIP 和 DynamicPrompt 推理同一张图片
-    """
+    """多模型对比API"""
     if 'image' not in request.files:
         return jsonify({"error": "No image provided"}), 400
 
@@ -396,20 +518,16 @@ def compare_models():
         zero_shot_results = classifier.predict_zero_shot(image_tensor, top_k)
 
         # 计算差异
-        dynamic_top5 = [r["breed"] for r in dynamic_results]
-        zero_shot_top5 = [r["breed"] for r in zero_shot_results]
-
-        # 找出两种方法预测不同的品种
-        dynamic_probs = {r["breed"]: r["probability"] for r in dynamic_results}
-        zero_shot_probs = {r["breed"]: r["probability"] for r in zero_shot_results}
+        dynamic_probs = {r["car_model"]: r["probability"] for r in dynamic_results}
+        zero_shot_probs = {r["car_model"]: r["probability"] for r in zero_shot_results}
 
         differences = []
-        for breed in set(list(dynamic_probs.keys()) + list(zero_shot_probs.keys())):
-            dp = dynamic_probs.get(breed, 0)
-            zp = zero_shot_probs.get(breed, 0)
+        for car_model in set(list(dynamic_probs.keys()) + list(zero_shot_probs.keys())):
+            dp = dynamic_probs.get(car_model, 0)
+            zp = zero_shot_probs.get(car_model, 0)
             if abs(dp - zp) > 0.01:
                 differences.append({
-                    "breed": breed,
+                    "car_model": car_model,
                     "dynamic_prob": dp,
                     "zero_shot_prob": zp,
                     "difference": round(dp - zp, 4)
@@ -426,12 +544,11 @@ def compare_models():
                 "predictions": zero_shot_results
             },
             "comparison": {
-                "dynamic_top1": dynamic_results[0]["breed"],
+                "dynamic_top1": dynamic_results[0]["car_model"],
                 "dynamic_confidence": dynamic_results[0]["probability"],
-                "zero_shot_top1": zero_shot_results[0]["breed"],
+                "zero_shot_top1": zero_shot_results[0]["car_model"],
                 "zero_shot_confidence": zero_shot_results[0]["probability"],
-                "agreement": dynamic_results[0]["breed"] == zero_shot_results[0]["breed"],
-                "top5_overlap": len(set(dynamic_top5) & set(zero_shot_top5)),
+                "agreement": dynamic_results[0]["car_model"] == zero_shot_results[0]["car_model"],
                 "probability_differences": differences[:10]
             }
         })
@@ -441,52 +558,49 @@ def compare_models():
         return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
-@app.route('/api/breed/<breed_name>', methods=['GET'])
-def get_breed_info(breed_name):
-    """获取品种详细信息"""
+@app.route('/api/model/<car_model>', methods=['GET'])
+def get_car_info(car_model):
+    """获取车型详细信息"""
     try:
-        # 将 URL 中的名称转换为标准格式
-        breed_name = breed_name.replace('_', ' ').title()
-        attributes = classifier.breed_db.get_attributes(breed_name)
+        # 将 URL 中的名称转换
+        car_model = car_model.replace('_', ' ')
 
-        if not attributes:
-            return jsonify({"error": f"Breed '{breed_name}' not found"}), 404
-
-        # 生成不同模板类型的提示词
-        prompts = classifier.breed_db.get_prompts(breed_name, template_type="detailed")
+        # 解析年份和品牌
+        parts = car_model.split()
+        year = parts[0] if parts and parts[0].isdigit() else "Unknown"
+        brand = parts[1] if len(parts) > 1 else "Unknown"
 
         return jsonify({
             "success": True,
-            "breed": breed_name,
-            "attributes": attributes,
-            "prompts": prompts,
-            "type": attributes.get("type", "unknown")
+            "car_model": car_model,
+            "year": year,
+            "brand": brand,
+            "full_name": car_model
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/breeds', methods=['GET'])
-def get_all_breeds():
-    """获取所有品种列表及属性"""
+@app.route('/api/models', methods=['GET'])
+def get_all_models():
+    """获取所有车型列表"""
     try:
-        breeds = []
+        models = []
         for classname in classifier.classnames:
-            breed_name = classname.replace('_', ' ').title()
-            attr = classifier.breed_db.get_attributes(breed_name)
-            breeds.append({
-                "name": breed_name,
-                "type": attr.get("type", "unknown") if attr else "unknown",
-                "has_attributes": attr is not None
+            parts = classname.split()
+            year = parts[0] if parts and parts[0].isdigit() else "Unknown"
+            brand = parts[1] if len(parts) > 1 else "Unknown"
+            models.append({
+                "name": classname,
+                "year": year,
+                "brand": brand
             })
 
         return jsonify({
             "success": True,
-            "breeds": breeds,
-            "count": len(breeds),
-            "cats": sum(1 for b in breeds if b["type"] == "cat"),
-            "dogs": sum(1 for b in breeds if b["type"] == "dog")
+            "models": models,
+            "count": len(models)
         })
 
     except Exception as e:
@@ -499,21 +613,11 @@ def get_experiment_results():
     try:
         return jsonify({
             "success": True,
-            "experiments": classifier.experiment_summary,
-            "comparison_results": _load_comparison_results()
+            "experiments": classifier.experiment_summary
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-def _load_comparison_results():
-    """加载模型对比结果"""
-    comparison_path = os.path.join(FGDC_PATH, "comparison_results", "comparison_summary.json")
-    if os.path.exists(comparison_path):
-        with open(comparison_path, 'r') as f:
-            return json.load(f)
-    return {}
 
 
 @app.route('/api/health', methods=['GET'])
@@ -524,7 +628,8 @@ def health():
         "device": classifier.device,
         "model_loaded": classifier.use_trained_model,
         "model_type": "DynamicPromptTrainer" if classifier.use_trained_model else "Zero-shot CLIP",
-        "shot": classifier.shot if classifier.use_trained_model else None
+        "shot": classifier.shot if classifier.use_trained_model else None,
+        "num_classes": len(classifier.classnames)
     })
 
 
@@ -536,7 +641,7 @@ def get_model_info():
         "device": classifier.device,
         "backbone": "RN50",
         "num_classes": len(classifier.classnames),
-        "classnames": [c.replace('_', ' ') for c in classifier.classnames],
+        "classnames": classifier.classnames,
         "shot": classifier.shot if classifier.use_trained_model else None
     }
 
@@ -570,10 +675,10 @@ def serve_static(filename):
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Pet Classification API (Research Edition)')
+    parser = argparse.ArgumentParser(description='Car Classification API (Research Edition)')
     parser.add_argument('--model', type=str, default=None,
                         help='Path to trained model checkpoint')
-    parser.add_argument('--port', type=int, default=5001,
+    parser.add_argument('--port', type=int, default=5002,
                         help='Port to run the API server')
     parser.add_argument('--shot', type=str, default="16",
                         choices=["1", "2", "4", "8", "16"],
@@ -586,14 +691,14 @@ if __name__ == '__main__':
         epoch_str = epoch_map[args.shot]
         auto_path = os.path.join(
             FGDC_PATH,
-            f"output_fgd/oxford_pets/DynamicPromptTrainer/shots_{args.shot}/seed_1/prompt_learner/model.pth.tar-{epoch_str}"
+            f"output_fgd/stanford_cars/DynamicPromptTrainer/shots_{args.shot}/seed_1/prompt_learner/model.pth.tar-{epoch_str}"
         )
         if os.path.exists(auto_path):
             args.model = auto_path
             print(f"Auto-selected model: {auto_path}")
 
     print("="*60)
-    print("Fine-Grained Pet Classification API - Research Edition")
+    print("Fine-Grained Car Classification API - Research Edition")
     print("="*60)
     if args.model:
         print(f"Model path: {args.model}")
@@ -602,14 +707,14 @@ if __name__ == '__main__':
         print("Mode: Zero-shot CLIP")
     print("="*60)
 
-    classifier = PetClassifierAPI(model_path=args.model, shot=args.shot)
+    classifier = CarClassifierAPI(model_path=args.model, shot=args.shot)
 
     print(f"\nStarting API server on http://localhost:{args.port}")
     print(f"API Documentation:")
     print(f"  POST /api/classify      - 单图分类")
     print(f"  POST /api/compare       - 多模型对比")
-    print(f"  GET  /api/breeds        - 品种列表")
-    print(f"  GET  /api/breed/<name>  - 品种详情")
+    print(f"  GET  /api/models        - 车型列表")
+    print(f"  GET  /api/model/<name>  - 车型详情")
     print(f"  GET  /api/experiments   - 实验结果")
     print(f"  GET  /api/model-info    - 模型信息")
     print(f"  GET  /api/health        - 健康检查")

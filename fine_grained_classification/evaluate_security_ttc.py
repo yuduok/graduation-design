@@ -28,6 +28,7 @@ for path in [str(CURRENT_DIR), str(COOP_PATH), str(DASSL_PATH), str(TTC_CODE_PAT
         sys.path.insert(0, path)
 
 import datasets.oxford_pets  # noqa: F401
+import datasets.stanford_cars  # noqa: F401
 from dassl.config import get_cfg_default
 from dassl.data import DataManager
 from yacs.config import CfgNode as CN
@@ -150,7 +151,7 @@ def tau_thres_weighted_counterattacks(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate DynamicPromptTrainer with original TTC defense")
-    parser.add_argument("--dataset", type=str, default="oxford_pets", choices=["oxford_pets"])
+    parser.add_argument("--dataset", type=str, default="oxford_pets", choices=["oxford_pets", "stanford_cars"])
     parser.add_argument("--shots", type=int, default=1)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -167,7 +168,7 @@ def parse_args():
     parser.add_argument("--tau-thres", type=float, default=0.2)
     parser.add_argument("--beta", type=float, default=2.0)
     parser.add_argument("--max-batches", type=int, default=None)
-    parser.add_argument("--output", type=str, default="security_results/ttc_dynamic_prompt_oxford_pets.json")
+    parser.add_argument("--output", type=str, default=None)
     return parser.parse_args()
 
 
@@ -191,7 +192,14 @@ def build_cfg(args):
     cfg.TRAINER.DYNAMIC.LR = 0.002
     cfg.merge_from_file(str(CURRENT_DIR / args.config))
     cfg.DATASET.ROOT = str(PROJECT_ROOT / "data")
-    cfg.DATASET.NAME = "OxfordPets"
+
+    # 数据集名称映射
+    dataset_name_map = {
+        "oxford_pets": "OxfordPets",
+        "stanford_cars": "StanfordCars",
+    }
+    cfg.DATASET.NAME = dataset_name_map.get(args.dataset, args.dataset)
+
     cfg.DATASET.NUM_SHOTS = args.shots
     cfg.DATASET.SUBSAMPLE_CLASSES = "all"
     cfg.DATASET.SPLIT = 1
@@ -283,6 +291,13 @@ class DynamicPromptVictimCore(nn.Module):
         state_dict.pop("token_suffix", None)
         self.prompt_learner.load_state_dict(state_dict, strict=False)
 
+    def to(self, *args, **kwargs):
+        super().to(*args, **kwargs)
+        # 确保 tokenized_prompts 也移动到正确的设备
+        if hasattr(self.prompt_learner, 'tokenized_prompts'):
+            self.prompt_learner.tokenized_prompts = self.prompt_learner.tokenized_prompts.to(*args, **kwargs)
+        return self
+
     def encode_image(self, images, prompt_token=None):
         del prompt_token
         image_features = self.image_encoder(images.type(self.dtype))
@@ -295,13 +310,29 @@ class DynamicPromptVictimCore(nn.Module):
 
         prompts = self.prompt_learner(image_features)
         batch_size, n_cls, n_tkn, _ = prompts.shape
-        prompts = prompts.view(-1, n_tkn, prompts.size(-1))
 
+        # 分批编码文本特征，避免显存溢出
+        all_text_features = []
         tokenized = self.prompt_learner.tokenized_prompts.to(raw_images.device)
-        tokenized = tokenized.unsqueeze(0).expand(batch_size, -1, -1).reshape(batch_size * n_cls, -1)
-        text_features = self.text_encoder(prompts, tokenized)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-        text_features = text_features.view(batch_size, n_cls, -1)
+        
+        chunk_size = 50  # 每批处理50类
+        for i in range(0, n_cls, chunk_size):
+            end_i = min(i + chunk_size, n_cls)
+            chunk_prompts = prompts[:, i:end_i, :, :].reshape(-1, n_tkn, prompts.size(-1))
+            chunk_tokenized = tokenized[i:end_i].unsqueeze(0).expand(batch_size, -1, -1).reshape(batch_size * (end_i - i), -1)
+            
+            with torch.cuda.amp.autocast(enabled=False):
+                chunk_text_features = self.text_encoder(chunk_prompts, chunk_tokenized)
+            chunk_text_features = chunk_text_features / chunk_text_features.norm(dim=-1, keepdim=True)
+            chunk_text_features = chunk_text_features.view(batch_size, end_i - i, -1)
+            all_text_features.append(chunk_text_features)
+            
+            # 及时释放中间变量
+            del chunk_prompts, chunk_tokenized, chunk_text_features
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        text_features = torch.cat(all_text_features, dim=1)
 
         logits = self.logit_scale.exp() * (
             image_features.unsqueeze(1) @ text_features.transpose(1, 2)
@@ -494,7 +525,12 @@ def main():
         }
     )
 
-    output_path = CURRENT_DIR / args.output
+    # 自动设置输出路径
+    if args.output is None:
+        output_filename = f"ttc_dynamic_prompt_{args.dataset}.json"
+        output_path = CURRENT_DIR / "security_results" / output_filename
+    else:
+        output_path = CURRENT_DIR / args.output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(results, indent=2, ensure_ascii=False))
 
